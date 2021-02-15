@@ -16,7 +16,7 @@ argParser.add_argument('--epochs', type=int, default=20, help='number of epochs 
 argParser.add_argument('--train_batch_size', type=int, default=128, help='training batch size')
 argParser.add_argument('--log_every', type=int, default=1000, help='Log losses after every n mini batches')
 argParser.add_argument('--train_image_dir', type=str, required=True, help='dir with training images in')
-argParser.add_argument('--save_path', type=str, default='models', help='dir to save model during training.')
+argParser.add_argument('--save_path', type=str, default='checkpoints', help='dir to save model during training.')
 args = argParser.parse_args()
 
 log = utils.logger("EPNet")
