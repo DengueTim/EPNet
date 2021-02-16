@@ -5,7 +5,7 @@ import random
 import torchvision.transforms as transforms
 
 class ImagePatchTranslationLoader(torch.utils.data.Dataset):
-    def __init__(self, image_filenames, patches_per_image, patch_size=16, patch_scale=8, log=None):
+    def __init__(self, image_filenames, patches_per_image, patch_size=17, patch_scale=8, log=None):
         self.image_filenames = image_filenames
         self.patch_size = patch_size
         self.patch_scale = patch_scale
@@ -23,6 +23,8 @@ class ImagePatchTranslationLoader(torch.utils.data.Dataset):
         image_index = index // self.patches_per_image
         image = self.last_image
         if image_index != self.last_image_index:
+            if self.last_image:
+                self.last_image.close()
             image_filename = self.image_filenames[image_index]
             image = Image.open(image_filename).convert('RGB')
             self.last_image_index = index
@@ -54,10 +56,28 @@ class ImagePatchTranslationLoader(torch.utils.data.Dataset):
         patch_a = transforms.ToTensor()(patch_a)
         patch_b = transforms.ToTensor()(patch_b)
 
-        # if self.log:
-        #    self.log.info('{}:{} {}:{}'.format(xa, ya, (x_offset / self.patch_scale), (y_offset / self.patch_scale)))
+        # WIP: Some kind of measure of how smooth the patch is around its center
+        # Like higher gradients(more texture) should lead to a more confidant prediction.
+        xy1 = self.patch_size // 2 - 4
+        xy2 = self.patch_size // 2 + 5
+        center_patch = patch_a[:, xy1:xy2, xy1:xy2]
+        sum_of_err_x = 0;
+        sum_of_err_y = 0;
+        for i in (1,-1,2,-2,3,-3):
+            shifted_patch = patch_a[:, xy1:xy2, xy1 + i:xy2 + i]
+            diff = center_patch - shifted_patch
+            sum_of_err_x += diff.abs().sum().item() / (9 * 9 * 3)
+            shifted_patch = patch_a[:, xy1 + 1:xy2 + 1, xy1:xy2]
+            diff = center_patch - shifted_patch
+            sum_of_err_y += diff.abs().sum().item() / (9 * 9 * 3)
 
-        return patch_a, patch_b, torch.tensor([x_offset / self.patch_scale, y_offset / self.patch_scale, 0.0, 0.0])
+        cx = 1 - 1 / (1 + sum_of_err_x)
+        cy = 1 - 1 / (1 + sum_of_err_y)
+
+        #if self.log:
+        #   self.log.info('{}:{}\t{}:{}'.format((x_offset / self.patch_scale), round(cx,3), (y_offset / self.patch_scale), round(cy, 3)))
+
+        return patch_a, patch_b, torch.tensor([x_offset / half_src_size, y_offset / half_src_size, cx, cy])
 
     def __len__(self):
         return len(self.image_filenames) * self.patches_per_image

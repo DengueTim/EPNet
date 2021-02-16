@@ -6,23 +6,34 @@ class ElParoNet(nn.Module):
     def __init__(self):
         super().__init__()
         self.featureNet = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=5),
+            nn.Conv2d(3, 64, kernel_size=5),
+            nn.BatchNorm2d(64),
             nn.LeakyReLU(),
-            nn.Conv2d(32, 32, kernel_size=3),
+            nn.Conv2d(64, 64, kernel_size=3),
+            nn.BatchNorm2d(64),
             nn.LeakyReLU(),
-            nn.Conv2d(32, 32, kernel_size=3),
+            nn.Conv2d(64, 64, kernel_size=3),
+            nn.BatchNorm2d(64),
             nn.LeakyReLU(),
-            nn.Conv2d(32, 16, kernel_size=1),
+            nn.Conv2d(64, 48, kernel_size=3),
+            nn.BatchNorm2d(48),
+            nn.LeakyReLU(),
+            nn.Conv2d(48, 32, kernel_size=3),
+            nn.BatchNorm2d(32),
             nn.LeakyReLU()
         )
         self.offsetNet = nn.Sequential(
-            nn.Linear(2048 ,128),
+            nn.Linear(1600,512),
+            nn.BatchNorm1d(512),
             nn.LeakyReLU(),
-            nn.Linear(128,128),
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
             nn.LeakyReLU(),
-            nn.Linear(128,128),
+            nn.Linear(256,256),
             nn.LeakyReLU(),
-            nn.Linear(128,4),
+            nn.Linear(256,128),
+            nn.LeakyReLU(),
+            nn.Linear(128,4)
         )
 
     def forward(self, patch_a, patch_b):

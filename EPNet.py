@@ -12,8 +12,8 @@ from models.ElParoNetModel import ElParoNet
 from loaders.ImagePatchTransalationLoader import ImagePatchTranslationLoader
 
 argParser = argparse.ArgumentParser(description="El Paro Net...")
-argParser.add_argument('--epochs', type=int, default=20, help='number of epochs do')
-argParser.add_argument('--train_batch_size', type=int, default=128, help='training batch size')
+argParser.add_argument('--epochs', type=int, default=200, help='number of epochs do')
+argParser.add_argument('--train_batch_size', type=int, default=32, help='training batch size')
 argParser.add_argument('--log_every', type=int, default=1000, help='Log losses after every n mini batches')
 argParser.add_argument('--train_image_dir', type=str, required=True, help='dir with training images in')
 argParser.add_argument('--save_path', type=str, default='checkpoints', help='dir to save model during training.')
@@ -45,19 +45,22 @@ def train(loader, model, optimizer, log):
         batch_loss_monitor.update(loss)
 
         if batch_index % args.log_every == 0:
-            loss_str = '{:.2f} ({:.2f})'.format(
+            loss_str = '{:.4f} ({:.4f})'.format(
                 batch_loss_monitor.last / args.train_batch_size,
                 batch_loss_monitor.average() / args.train_batch_size)
+            ps = [round(p, 4) for p in predictions[0].tolist()]
+            ys = [round(y, 4) for y in y[0].tolist()]
             log.info('[{}/{}]\t{} prediction0:{} y0:{}'.format(
-                batch_index, loader_size, loss_str, predictions[0].tolist(), y[0].tolist()))
+                batch_index, loader_size, loss_str, ps, ys))
     log.info('Epoch end average train loss = {}'.format(batch_loss_monitor.average() / args.train_batch_size))
 
 def main():
     image_filenames = utils.getImageFilenamesWithPaths(args.train_image_dir)
 
     training_loader = torch.utils.data.DataLoader(
-        ImagePatchTranslationLoader(image_filenames, patches_per_image=(args.train_batch_size * 16), log=log),
-        batch_size=args.train_batch_size, num_workers=args.train_batch_size, drop_last=False
+        ImagePatchTranslationLoader(image_filenames, patches_per_image=(args.train_batch_size * 8), log=log),
+        batch_size=args.train_batch_size, num_workers=args.train_batch_size,
+        pin_memory=True, drop_last=False
     )
 
     model = ElParoNet()
@@ -69,10 +72,13 @@ def main():
     start_epoch = 1
 
     last_saved_checkpoint = -1
-    for filename in os.listdir(args.save_path):
-        match = re.match('cp(\d+).pth', filename)
-        if match and last_saved_checkpoint < int(match.group(1)):
-            last_saved_checkpoint = int(match.group(1))
+    if os.path.isdir(args.save_path):
+        for filename in os.listdir(args.save_path):
+            match = re.match('cp(\d+).pth', filename)
+            if match and last_saved_checkpoint < int(match.group(1)):
+                last_saved_checkpoint = int(match.group(1))
+    else:
+        os.mkdir(args.save_path)
 
     if last_saved_checkpoint >= 0:
         model_save_path = args.save_path + '/cp' + str(last_saved_checkpoint) + '.pth'
