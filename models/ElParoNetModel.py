@@ -6,12 +6,14 @@ class ElParoNet(nn.Module):
     def __init__(self):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(1734,512),
+            nn.Linear(578,512),
             nn.LeakyReLU(),
-            nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
+            nn.Linear(512, 512),
+            nn.BatchNorm1d(512),
             nn.LeakyReLU(),
-            nn.Linear(256,256),
+            nn.Linear(512,256),
+            nn.LeakyReLU(),
+            nn.Linear(256, 256),
             nn.LeakyReLU(),
             nn.Linear(256,128),
             nn.LeakyReLU(),

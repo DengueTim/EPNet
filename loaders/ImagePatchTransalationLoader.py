@@ -3,6 +3,10 @@ import torch.utils.data
 from PIL import Image
 import random
 import torchvision.transforms as transforms
+import torch.nn.functional as F
+import numpy as np
+
+import matplotlib.pyplot as plt
 
 class ImagePatchTranslationLoader(torch.utils.data.Dataset):
     def __init__(self, image_filenames, patches_per_image, patch_size=17, patch_scale=8, log=None):
@@ -26,7 +30,7 @@ class ImagePatchTranslationLoader(torch.utils.data.Dataset):
             if self.last_image:
                 self.last_image.close()
             image_filename = self.image_filenames[image_index]
-            image = Image.open(image_filename).convert('RGB')
+            image = Image.open(image_filename) # .convert('RGB')
             self.last_image_index = index
             self.last_image = image
 
@@ -50,29 +54,59 @@ class ImagePatchTranslationLoader(torch.utils.data.Dataset):
         patch_a = image.crop((xa, ya, xa + src_size, ya + src_size))
         patch_b = image.crop((xb, yb, xb + src_size, yb + src_size))
 
-        patch_a = patch_a.resize((self.patch_size, self.patch_size), Image.BILINEAR)
-        patch_b = patch_b.resize((self.patch_size, self.patch_size), Image.BILINEAR)
+        with torch.no_grad():
+            patch_a = transforms.ToTensor()(patch_a)
+            patch_b = transforms.ToTensor()(patch_b)
 
-        patch_a = transforms.ToTensor()(patch_a)
-        patch_b = transforms.ToTensor()(patch_b)
+        patch_a = F.interpolate(patch_a.unsqueeze(0), size=[self.patch_size, self.patch_size], mode='bilinear', align_corners=True).squeeze()
+        patch_b = F.interpolate(patch_b.unsqueeze(0), size=[self.patch_size, self.patch_size], mode='bilinear', align_corners=True).squeeze()
+
+        # xy1 = half_src_size // 2
+        # xy2 = half_src_size + xy1
+        # center_patch = patch_a[xy1:xy2, xy1:xy2]
+        # d = np.zeros((half_src_size, half_src_size))
+        # for x in range(0, half_src_size):
+        #     for y in range(0, half_src_size):
+        #         patch_diff = center_patch - patch_a[y:half_src_size + y, x:half_src_size + x]
+        #         d[y,x] = patch_diff.abs().sum()
+
+        # half_patch_size = 1 + self.patch_size // 2
+        # xy1 = half_patch_size - 5
+        # xy2 = half_patch_size + 4
+        # center_patch = patch_a[xy1:xy2, xy1:xy2]
+        # d = np.zeros((half_patch_size, half_patch_size))
+        # for x in range(0, half_patch_size):
+        #     for y in range(0, half_patch_size):
+        #         patch_diff = center_patch - patch_a[y:half_patch_size + y, x:half_patch_size + x]
+        #         d[y, x] = patch_diff.abs().sum()
+        # #plt.imshow(patch_a.permute(1, 2, 0))
+        # plt.imshow(patch_a, cmap='gray')
+        # plt.show()
+        # plt.imshow(d, cmap='gray')
+        # plt.show()
+#        patch_a = patch_a.resize((self.patch_size, self.patch_size), Image.BILINEAR)
+#        patch_b = patch_b.resize((self.patch_size, self.patch_size), Image.BILINEAR)
+
+
 
         # WIP: Some kind of measure of how smooth the patch is around its center
         # Like higher gradients(more texture) should lead to a more confidant prediction.
         xy1 = self.patch_size // 2 - 4
         xy2 = self.patch_size // 2 + 5
-        center_patch = patch_a[:, xy1:xy2, xy1:xy2]
+        center_patch = patch_a[xy1:xy2, xy1:xy2]
         sum_of_err_x = 0;
         sum_of_err_y = 0;
-        for i in (1,-1,2,-2,3,-3):
-            shifted_patch = patch_a[:, xy1:xy2, xy1 + i:xy2 + i]
+        offsets = [1, -1, 2, -2, 3, -3]
+        for i in offsets:
+            shifted_patch = patch_a[xy1:xy2, xy1 + i:xy2 + i]
             diff = center_patch - shifted_patch
-            sum_of_err_x += diff.abs().sum().item() / (9 * 9 * 3)
-            shifted_patch = patch_a[:, xy1 + 1:xy2 + 1, xy1:xy2]
+            sum_of_err_x += diff.abs().sum().item() / len(offsets)
+            shifted_patch = patch_a[xy1 + 1:xy2 + 1, xy1:xy2]
             diff = center_patch - shifted_patch
-            sum_of_err_y += diff.abs().sum().item() / (9 * 9 * 3)
+            sum_of_err_y += diff.abs().sum().item() / len(offsets)
 
-        cx = 1 - 1 / (1 + sum_of_err_x)
-        cy = 1 - 1 / (1 + sum_of_err_y)
+        cx = 1 / (1 + sum_of_err_x)
+        cy = 1 / (1 + sum_of_err_y)
 
         #if self.log:
         #   self.log.info('{}:{}\t{}:{}'.format((x_offset / self.patch_scale), round(cx,3), (y_offset / self.patch_scale), round(cy, 3)))
