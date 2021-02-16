@@ -36,9 +36,9 @@ def train(loader, model, optimizer, log):
 
         predictions = model(patch_a, patch_b)
         losses = predictions - y
-        losses = losses * losses
+        losses = losses.abs() # losses * losses
         losses = losses.sum(dim=0)
-        loss = losses.sum()
+        loss = losses[0] + losses[1] + (losses[2] + losses[3]) * 2
         loss.backward()
         optimizer.step()
 
