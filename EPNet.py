@@ -7,6 +7,8 @@ import os
 import os.path
 import re
 
+import matplotlib.pyplot as plt
+
 import utils
 from models.ElParoNetModel import ElParoNet
 from loaders.ImagePatchTransalationLoader import ImagePatchTranslationLoader
@@ -36,9 +38,9 @@ def train(loader, model, optimizer, log):
 
         predictions = model(patch_a, patch_b)
         losses = predictions - y
-        losses = losses.abs() # losses * losses
-        losses = losses.sum(dim=0)
-        loss = losses[0] + losses[1] + (losses[2] + losses[3]) * 2
+        losses_abs = losses.abs() # losses * losses
+        losses_batch = losses_abs.sum(dim=0)
+        loss = losses_batch[0] + losses_batch[1] + losses_batch[2] / 4 + losses_batch[3] / 4
         loss.backward()
         optimizer.step()
 
@@ -48,10 +50,17 @@ def train(loader, model, optimizer, log):
             loss_str = '{:.4f} ({:.4f})'.format(
                 batch_loss_monitor.last / args.train_batch_size,
                 batch_loss_monitor.average() / args.train_batch_size)
-            ps = [round(p, 4) for p in predictions[0].tolist()]
+            ls = [round(p, 4) for p in losses[0].tolist()]
             ys = [round(y, 4) for y in y[0].tolist()]
-            log.info('[{}/{}]\t{} prediction0:{} y0:{}'.format(
-                batch_index, loader_size, loss_str, ps, ys))
+            log.info('[{}/{}]\t{} losses0:{} y0:{}'.format(
+                batch_index, loader_size, loss_str, ls, ys))
+
+            # if losses_abs[0, 0] > 0.2 or losses_abs[0, 1] > 0.2:
+            #     fig, ax = plt.subplots(nrows=1, ncols=2)
+            #     ax.flat[0].imshow(patch_a[0].cpu(), cmap='gray')
+            #     ax.flat[1].imshow(patch_b[0].cpu(), cmap='gray')
+            #     plt.show()
+
     log.info('Epoch end average train loss = {}'.format(batch_loss_monitor.average() / args.train_batch_size))
 
 def main():

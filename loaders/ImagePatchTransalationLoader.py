@@ -9,7 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 class ImagePatchTranslationLoader(torch.utils.data.Dataset):
-    def __init__(self, image_filenames, patches_per_image, patch_size=17, patch_scale=8, log=None):
+    def __init__(self, image_filenames, patches_per_image, patch_size=33, patch_scale=4, log=None):
         self.image_filenames = image_filenames
         self.patch_size = patch_size
         self.patch_scale = patch_scale
@@ -40,13 +40,14 @@ class ImagePatchTranslationLoader(torch.utils.data.Dataset):
         # TODO: confidence GT...
         src_size = self.patch_size * self.patch_scale
         half_src_size = src_size // 2
+        quarter_src_size = half_src_size // 2
 
         image_w, image_h = image.size
-        xa = random.randint(half_src_size, image_w - half_src_size - src_size)
-        ya = random.randint(half_src_size, image_h - half_src_size - src_size)
+        xa = random.randint(quarter_src_size, image_w - src_size - quarter_src_size)
+        ya = random.randint(quarter_src_size, image_h - src_size - quarter_src_size)
 
-        x_offset = random.randint(-half_src_size, half_src_size)
-        y_offset = random.randint(-half_src_size, half_src_size)
+        x_offset = random.randint(-quarter_src_size, quarter_src_size)
+        y_offset = random.randint(-quarter_src_size, quarter_src_size)
 
         xb = xa + x_offset
         yb = ya + y_offset
@@ -91,27 +92,28 @@ class ImagePatchTranslationLoader(torch.utils.data.Dataset):
 
         # WIP: Some kind of measure of how smooth the patch is around its center
         # Like higher gradients(more texture) should lead to a more confidant prediction.
-        xy1 = self.patch_size // 2 - 4
-        xy2 = self.patch_size // 2 + 5
+        xy1 = self.patch_size // 2 - 8
+        xy2 = self.patch_size // 2 + 9
         center_patch = patch_a[xy1:xy2, xy1:xy2]
-        sum_of_err_x = 0;
-        sum_of_err_y = 0;
-        offsets = [1, -1, 2, -2, 3, -3]
+        sum_of_err_x = 0
+        sum_of_err_y = 0
+        offsets = [2, -2, 4, -4, 6, -6]
+        err_denominator = len(offsets) * 9 * 9
         for i in offsets:
             shifted_patch = patch_a[xy1:xy2, xy1 + i:xy2 + i]
             diff = center_patch - shifted_patch
-            sum_of_err_x += diff.abs().sum().item() / len(offsets)
-            shifted_patch = patch_a[xy1 + 1:xy2 + 1, xy1:xy2]
+            sum_of_err_x += diff.abs().sum().item() / err_denominator
+            shifted_patch = patch_a[xy1 + i:xy2 + i, xy1:xy2]
             diff = center_patch - shifted_patch
-            sum_of_err_y += diff.abs().sum().item() / len(offsets)
+            sum_of_err_y += diff.abs().sum().item() / err_denominator
 
-        cx = 1 / (1 + sum_of_err_x)
-        cy = 1 / (1 + sum_of_err_y)
+        cx = 1 - (1 / (1 + 10 * sum_of_err_x))
+        cy = 1 - (1 / (1 + 10 * sum_of_err_y))
 
         #if self.log:
         #   self.log.info('{}:{}\t{}:{}'.format((x_offset / self.patch_scale), round(cx,3), (y_offset / self.patch_scale), round(cy, 3)))
 
-        return patch_a, patch_b, torch.tensor([x_offset / half_src_size, y_offset / half_src_size, cx, cy])
+        return patch_a, patch_b, torch.tensor([x_offset / quarter_src_size, y_offset / quarter_src_size, cx, cy])
 
     def __len__(self):
         return len(self.image_filenames) * self.patches_per_image
