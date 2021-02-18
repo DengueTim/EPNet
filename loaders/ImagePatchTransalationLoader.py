@@ -6,10 +6,14 @@ import torchvision.transforms as transforms
 import torch.nn.functional as F
 import numpy as np
 
+from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
+from scipy.stats import multivariate_normal
+
+import utils
 
 class ImagePatchTranslationLoader(torch.utils.data.Dataset):
-    def __init__(self, image_filenames, patches_per_image, patch_size=33, patch_scale=4, log=None):
+    def __init__(self, image_filenames, patches_per_image, patch_size=17, patch_scale=4, log=None):
         self.image_filenames = image_filenames
         self.patch_size = patch_size
         self.patch_scale = patch_scale
@@ -59,61 +63,56 @@ class ImagePatchTranslationLoader(torch.utils.data.Dataset):
             patch_a = transforms.ToTensor()(patch_a)
             patch_b = transforms.ToTensor()(patch_b)
 
+            # Fit gaussian to difference of patches.
+        xy1 = quarter_src_size
+        xy2 = half_src_size + quarter_src_size
+        center_patch = patch_a[:, xy1:xy2, xy1:xy2]
+        d = np.zeros((half_src_size, half_src_size))
+        min_d = 100
+        for x in range(0, half_src_size):
+            for y in range(0, half_src_size):
+                patch_diff = center_patch - patch_a[:, y:half_src_size + y, x:half_src_size + x]
+                patch_diff += torch.randn_like(patch_diff) * 0.1
+                s = patch_diff.abs().sum()
+                d[y,x] = s
+                if s < min_d and s != 0:
+                    min_d = s.item()
+
+        min_d /= 1.2
+        d[quarter_src_size, quarter_src_size] = min_d
+        d = min_d / d
+
+        mx, my, sigma = utils.fit2dGuassian(d, quarter_src_size, quarter_src_size)
+
+        fig = plt.figure(figsize=(24, 8), dpi=112)
+        ax1 = fig.add_subplot(131)
+        ax1.imshow(patch_a.squeeze(0), cmap='gray')
+        ax2 = fig.add_subplot(132)
+        ax2.imshow(d, cmap='gray')
+        mn = multivariate_normal((mx,my), sigma)
+        xx, yy = np.mgrid[0:30, 0:30]
+        pos = np.dstack((xx, yy))
+        ax2.contour(xx, yy, mn.pdf(pos), colors='r', levels=np.linspace(0,0.01,6))
+
+        ax3 = fig.add_subplot(133, projection='3d')
+        x = range(0, half_src_size)
+        y = range(0, half_src_size)
+        x, y = np.meshgrid(x,y)
+        ax3.plot_surface(x,y, d)
+        plt.show()
+
+        # patch_a = patch_a.resize((self.patch_size, self.patch_size), Image.BILINEAR)
+        # patch_b = patch_b.resize((self.patch_size, self.patch_size), Image.BILINEAR)
+
+        # scale patches on GPU
+
         patch_a = F.interpolate(patch_a.unsqueeze(0), size=[self.patch_size, self.patch_size], mode='bilinear', align_corners=True).squeeze()
         patch_b = F.interpolate(patch_b.unsqueeze(0), size=[self.patch_size, self.patch_size], mode='bilinear', align_corners=True).squeeze()
-
-        # xy1 = half_src_size // 2
-        # xy2 = half_src_size + xy1
-        # center_patch = patch_a[xy1:xy2, xy1:xy2]
-        # d = np.zeros((half_src_size, half_src_size))
-        # for x in range(0, half_src_size):
-        #     for y in range(0, half_src_size):
-        #         patch_diff = center_patch - patch_a[y:half_src_size + y, x:half_src_size + x]
-        #         d[y,x] = patch_diff.abs().sum()
-
-        # half_patch_size = 1 + self.patch_size // 2
-        # xy1 = half_patch_size - 5
-        # xy2 = half_patch_size + 4
-        # center_patch = patch_a[xy1:xy2, xy1:xy2]
-        # d = np.zeros((half_patch_size, half_patch_size))
-        # for x in range(0, half_patch_size):
-        #     for y in range(0, half_patch_size):
-        #         patch_diff = center_patch - patch_a[y:half_patch_size + y, x:half_patch_size + x]
-        #         d[y, x] = patch_diff.abs().sum()
-        # #plt.imshow(patch_a.permute(1, 2, 0))
-        # plt.imshow(patch_a, cmap='gray')
-        # plt.show()
-        # plt.imshow(d, cmap='gray')
-        # plt.show()
-#        patch_a = patch_a.resize((self.patch_size, self.patch_size), Image.BILINEAR)
-#        patch_b = patch_b.resize((self.patch_size, self.patch_size), Image.BILINEAR)
-
-
-
-        # WIP: Some kind of measure of how smooth the patch is around its center
-        # Like higher gradients(more texture) should lead to a more confidant prediction.
-        xy1 = self.patch_size // 2 - 8
-        xy2 = self.patch_size // 2 + 9
-        center_patch = patch_a[xy1:xy2, xy1:xy2]
-        sum_of_err_x = 0
-        sum_of_err_y = 0
-        offsets = [2, -2, 4, -4, 6, -6]
-        err_denominator = len(offsets) * 9 * 9
-        for i in offsets:
-            shifted_patch = patch_a[xy1:xy2, xy1 + i:xy2 + i]
-            diff = center_patch - shifted_patch
-            sum_of_err_x += diff.abs().sum().item() / err_denominator
-            shifted_patch = patch_a[xy1 + i:xy2 + i, xy1:xy2]
-            diff = center_patch - shifted_patch
-            sum_of_err_y += diff.abs().sum().item() / err_denominator
-
-        cx = 1 - (1 / (1 + 10 * sum_of_err_x))
-        cy = 1 - (1 / (1 + 10 * sum_of_err_y))
 
         #if self.log:
         #   self.log.info('{}:{}\t{}:{}'.format((x_offset / self.patch_scale), round(cx,3), (y_offset / self.patch_scale), round(cy, 3)))
 
-        return patch_a, patch_b, torch.tensor([x_offset / quarter_src_size, y_offset / quarter_src_size, cx, cy])
+        return patch_a, patch_b, torch.tensor([x_offset / quarter_src_size, y_offset / quarter_src_size, 0, 0])
 
     def __len__(self):
         return len(self.image_filenames) * self.patches_per_image
