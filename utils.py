@@ -1,10 +1,7 @@
 import os
 import os.path
 import logging
-
-import numpy as np
-from scipy.stats import norm
-from scipy.optimize import curve_fit
+import torch
 
 def logger(name):
     logger = logging.getLogger(name)
@@ -50,50 +47,34 @@ def getImageFilenamesWithPaths(dir, filename_extention='.png'):
     filenames = [filename for filename in os.listdir(dir) if filename.endswith(filename_extention)]
     return [os.path.join(dir, filename) for filename in filenames]
 
-def mult_gaussFun_Fit(xy,*m):
-    A,x0,y0,varx,vary,rho,alpha = m
-    X,Y = np.meshgrid(xy[0],xy[1])
-    assert rho != 1
-    a = 1/(2*(1-rho**2))
-    Z = A*np.exp(-a*((X-x0)**2/(varx)+(Y-y0)**2/(vary)-(2*rho/(np.sqrt(varx*vary)))*(X-x0)*(Y-y0)))
-    return Z.ravel()
+def localCost(small, big, offset_x, offset_y, local_size=5):
+    s_ch, ssize_x, ssize_y = small.size()
+    b_ch, bsize_x, bsize_y = big.size()
 
-def fit2dGuassian(data2d, mx=None, my=None):
-    # Initial Guess
-    l = np.size(data2d,0)
-    d = data2d - np.amin(data2d)
-    d /= np.sum(d)
+    s_size = ssize_x * ssize_y
 
-    bin_centers = np.linspace(0.5, l - 0.5, l)
-    # Initial Guess
-    p0 = (np.amax(d), mx, my, 1, 1, 0.5, np.pi / 4)
-    bounds = (
-        [0, mx-0.1, my-0.1, 0, 0, 0.1, np.pi / 5],
-        [np.amax(d), mx+0.1, my+0.1, 10, 10, 1, np.pi / 3])
-
-    # Curve Fit parameters
-    coeff, var_matrix = curve_fit(mult_gaussFun_Fit, (bin_centers, bin_centers), d.ravel(), p0=p0, bounds=bounds, verbose=1)
-
-    return coeff, var_matrix
-    # l = np.size(data2d,0)
-    # min = np.amin(data2d)
-    # d = data2d - min
-    # d /= np.sum(d)
-    #
-    # (yis,xis) = np.mgrid[0:l,0:l]
-    # px = np.multiply(xis, d)
-    # py = np.multiply(yis, d)
-    # if mx is None:
-    #     mx = np.sum(px)
-    # if my is None:
-    #     my = np.sum(py)
-    #
-    # px = np.multiply(xis - mx, d)
-    # py = np.multiply(yis - my, d)
-    #
-    # a = np.sqrt(np.sum(np.power(px, 2))) * l
-    # b = np.sum(np.multiply(px, py)) * l
-    # #b = np.sqrt(b) if b >=0 else -np.sqrt(-b)
-    # c = np.sqrt(np.sum(np.power(py, 2))) * l
-    #
-    # return mx, my, np.array([[a,b],[b,c]])
+    half_local_size = local_size // 2
+    ix = int(round(bsize_x / 2 - ssize_x / 2 + offset_x - half_local_size))
+    iy = int(round(bsize_y / 2 - ssize_y / 2 + offset_y - half_local_size))
+    c = torch.zeros((local_size, local_size)).cuda()
+    min_x = 0
+    min_y = 0
+    max_x = 0
+    max_y = 0
+    for y in range(0, local_size):
+        for x in range(0, local_size):
+            # todo: weight towards patch center...
+            if ssize_y != 68 or ssize_x != 68 or iy < 0 or ix < 0 or iy + ssize_y > bsize_y or ix + ssize_x > bsize_x :
+                print("burf")
+            d = small - big[:, iy:iy + ssize_y, ix:ix + ssize_x]
+            s = d.abs().sum() / s_size
+            c[y, x] = s
+            if s.item() < c[min_y, min_x]:
+                min_x = x
+                min_y = y
+            if s.item() > c[max_y, max_x]:
+                max_x = x
+                max_y = y
+            ix += 1
+        iy += 1
+    return c, [min_x,min_y], [max_x, max_y]

@@ -3,12 +3,13 @@ import torch
 import torch.nn as nn
 
 class ElParoNet(nn.Module):
-    def __init__(self):
+    def __init__(self, patch_size):
         super().__init__()
+        input_size = patch_size * patch_size * 2
         self.net = nn.Sequential(
-            nn.Linear(2178,1024),
+            nn.Linear(input_size,512),
             nn.LeakyReLU(),
-            nn.Linear(1024, 512),
+            nn.Linear(512, 512),
             nn.LeakyReLU(),
             nn.Linear(512,256),
             nn.BatchNorm1d(256),

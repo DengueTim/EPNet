@@ -7,6 +7,7 @@ import os
 import os.path
 import re
 
+import torch.nn.functional as F
 import matplotlib.pyplot as plt
 
 import utils
@@ -19,40 +20,91 @@ argParser.add_argument('--train_batch_size', type=int, default=32, help='trainin
 argParser.add_argument('--log_every', type=int, default=1000, help='Log losses after every n mini batches')
 argParser.add_argument('--train_image_dir', type=str, required=True, help='dir with training images in')
 argParser.add_argument('--save_path', type=str, default='checkpoints', help='dir to save model during training.')
+argParser.add_argument('--patch_size', type=int, default=33, help='Size of image patches to learn')
+argParser.add_argument('--max_offset', type=int, default=8, help='Usually < patch_size/4')
+argParser.add_argument('--patch_scale', type=int, default=4, help='Scaling up of image patches for sampling')
+argParser.add_argument('--local_cost_size', type=int, default='5')
 args = argParser.parse_args()
 
 log = utils.logger("EPNet")
 
 def train(loader, model, optimizer, log):
+    input_patch_size = args.patch_size
     batch_loss_monitor = utils.LossMonitor()
+    batch_loss_monitor_gt = utils.LossMonitor()
     loader_size = len(loader)
+
+    patch_cost_margin = args.local_cost_size // 2
+    patch_size = args.patch_size * args.patch_scale + patch_cost_margin * 2
+    max_offset = args.max_offset * args.patch_scale
+
+    axy1 = max_offset + patch_cost_margin
+    axy2 = patch_size - axy1;
 
     model.train()
 
-    for batch_index, (patch_a, patch_b, y) in enumerate(loader):
-        patch_a = patch_a.float().cuda()
-        patch_b = patch_b.float().cuda()
+    for batch_index, (sample_patch_a, sample_patch_b, y) in enumerate(loader):
+        sample_patch_a = sample_patch_a.float().cuda()
+        sample_patch_b = sample_patch_b.float().cuda()
         y = y.cuda()
 
         optimizer.zero_grad()
 
-        predictions = model(patch_a, patch_b)
-        losses = predictions - y
+        input_patch_a = sample_patch_a[:, :, patch_cost_margin:-patch_cost_margin, patch_cost_margin:-patch_cost_margin]
+        input_patch_b = sample_patch_b[:, :, patch_cost_margin:-patch_cost_margin, patch_cost_margin:-patch_cost_margin]
+
+        input_patch_a = F.interpolate(input_patch_a, size=[input_patch_size, input_patch_size], mode='bilinear', align_corners=True)
+        input_patch_b = F.interpolate(input_patch_b, size=[input_patch_size, input_patch_size], mode='bilinear', align_corners=True)
+
+        predictions = model(input_patch_a, input_patch_b)
+
+        # loss...  from gradients of patches diffs
+        better_predictions = torch.zeros_like(y)
+        with torch.no_grad():
+            cropped_patch_a = sample_patch_a[:, :, axy1:axy2, axy1:axy2]
+            offset_predictions = predictions[:,0:2].clamp(-1,1) * max_offset
+
+            for i in range(0, predictions.size()[0]):
+                opx, opy = offset_predictions[i]
+                cost, mini, maxi = utils.localCost(cropped_patch_a[i], sample_patch_b[i], opx.item(), opy.item(),
+                                    local_size=args.local_cost_size)
+                better = torch.as_tensor(mini, dtype=torch.float).cuda()
+                better -= args.local_cost_size // 2
+                better += torch.floor(offset_predictions[i])
+                better /= max_offset * args.patch_scale
+                better_predictions[i][0] = better[0]
+                better_predictions[i][1] = better[1]
+
+        losses = predictions - better_predictions
         losses_abs = losses.abs() # losses * losses
         losses_batch = losses_abs.sum(dim=0)
-        loss = losses_batch[0] + losses_batch[1] + losses_batch[2] / 4 + losses_batch[3] / 4
+        loss = losses_batch[0] + losses_batch[1] # + losses_batch[2] / 4 + losses_batch[3] / 4
         loss.backward()
         optimizer.step()
 
         batch_loss_monitor.update(loss)
+
+        losses_gt = predictions - y
+        losses_gt_abs = losses_gt.abs()  # losses * losses
+        losses_gt_batch = losses_gt_abs.sum(dim=0)
+
+        batch_loss_monitor_gt.update(losses_gt_batch[0] + losses_gt_batch[1])
 
         if batch_index % args.log_every == 0:
             loss_str = '{:.4f} ({:.4f})'.format(
                 batch_loss_monitor.last / args.train_batch_size,
                 batch_loss_monitor.average() / args.train_batch_size)
             ls = [round(p, 4) for p in losses[0].tolist()]
+            ys = [round(y, 4) for y in better_predictions[0].tolist()]
+            log.info('[{}/{}]\t{} losses[0] Local:{} better:{}'.format(
+                batch_index, loader_size, loss_str, ls, ys))
+
+            loss_str = '{:.4f} ({:.4f})'.format(
+                batch_loss_monitor_gt.last / args.train_batch_size,
+                batch_loss_monitor_gt.average() / args.train_batch_size)
+            ls = [round(p, 4) for p in losses_gt[0].tolist()]
             ys = [round(y, 4) for y in y[0].tolist()]
-            log.info('[{}/{}]\t{} losses0:{} y0:{}'.format(
+            log.info('[{}/{}]\t{} losses[0] GT:{} y:{}'.format(
                 batch_index, loader_size, loss_str, ls, ys))
 
             # if losses_abs[0, 0] > 0.2 or losses_abs[0, 1] > 0.2:
@@ -61,18 +113,66 @@ def train(loader, model, optimizer, log):
             #     ax.flat[1].imshow(patch_b[0].cpu(), cmap='gray')
             #     plt.show()
 
-    log.info('Epoch end average train loss = {}'.format(batch_loss_monitor.average() / args.train_batch_size))
+    log.info('Epoch end average train loss GT = {}'.format(batch_loss_monitor_gt.average() / args.train_batch_size))
+    log.info('Epoch end average train loss Local = {}'.format(batch_loss_monitor.average() / args.train_batch_size))
+
+def test_accent(loader, model, log):
+    input_patch_size = args.patch_size
+
+    patch_cost_margin = args.local_cost_size // 2
+    patch_size = args.patch_size * args.patch_scale + patch_cost_margin * 2
+    max_offset = args.max_offset * args.patch_scale
+
+    axy1 = max_offset + patch_cost_margin
+    axy2 = patch_size - axy1;
+
+    for batch_index, (sample_patch_a, sample_patch_b, y) in enumerate(loader):
+        sample_patch_a = sample_patch_a.float().cuda()
+        sample_patch_b = sample_patch_b.float().cuda()
+        y = y.cuda()
+
+        input_patch_a = sample_patch_a[:, :, patch_cost_margin:-patch_cost_margin, patch_cost_margin:-patch_cost_margin]
+        input_patch_b = sample_patch_b[:, :, patch_cost_margin:-patch_cost_margin, patch_cost_margin:-patch_cost_margin]
+
+        input_patch_a = F.interpolate(input_patch_a, size=[input_patch_size, input_patch_size], mode='bilinear', align_corners=True)
+        input_patch_b = F.interpolate(input_patch_b, size=[input_patch_size, input_patch_size], mode='bilinear', align_corners=True)
+
+        predictions = model(input_patch_a, input_patch_b)
+        prediction = predictions[0,0:2].clamp(-1,1) * max_offset
+
+        log.info('GT: {}'.format(y[0]))
+        # loss...  from gradients of patches diffs
+        with torch.no_grad():
+            cropped_patch_a = sample_patch_a[0, :, axy1:axy2, axy1:axy2]
+            for step in range(0, 10):
+                opx, opy = prediction
+                cost, mini, maxi = utils.localCost(cropped_patch_a, sample_patch_b[0], opx.item(), opy.item(),
+                                                   local_size=args.local_cost_size)
+                better = torch.as_tensor(mini, dtype=torch.float).cuda()
+                better -= args.local_cost_size // 2
+                better += torch.floor(prediction)
+                better /= max_offset * args.patch_scale
+                prediction[0] = better[0]
+                prediction[1] = better[1]
+                log.info('Step {}: {}'.format(step, prediction))
+
+        break
 
 def main():
+    max_offset = args.max_offset * args.patch_scale
+    patch_cost_margin = args.local_cost_size // 2
+    sample_patch_size = args.patch_size * args.patch_scale + patch_cost_margin * 2
+
     image_filenames = utils.getImageFilenamesWithPaths(args.train_image_dir)
 
     training_loader = torch.utils.data.DataLoader(
-        ImagePatchTranslationLoader(image_filenames, patches_per_image=(args.train_batch_size * 8), log=log),
-        batch_size=args.train_batch_size, num_workers=args.train_batch_size,
+        ImagePatchTranslationLoader(image_filenames, patches_per_image=(args.train_batch_size * 8),
+                                    patch_size=sample_patch_size, max_offset=max_offset, log=log),
+        batch_size=args.train_batch_size, num_workers=0, #args.train_batch_size,
         pin_memory=True, drop_last=False
     )
 
-    model = ElParoNet()
+    model = ElParoNet(args.patch_size)
     model = nn.DataParallel(model).cuda()
     optimizer = optim.Adam(model.parameters())
     parameter_count = sum([p.data.nelement() for p in model.parameters()])
@@ -98,6 +198,9 @@ def main():
         log.info("=> loaded checkpoint {}".format(last_saved_checkpoint))
 
     end_epoch = start_epoch + args.epochs
+
+    test_accent(training_loader, model, log)
+    return -1
 
     for epoch in range(start_epoch, end_epoch):
         log.info('Starting epoch {} in range {} to {}'.format(epoch, start_epoch, end_epoch))
