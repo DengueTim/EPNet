@@ -31,10 +31,11 @@ class ImagePatchTranslationLoader(torch.utils.data.Dataset):
         image_index = index // self.patches_per_image
         image = self.last_image
         if image_index != self.last_image_index:
-            if self.last_image:
-                self.last_image.close()
             image_filename = self.image_filenames[image_index]
-            image = Image.open(image_filename) # .convert('RGB')
+            pil_image = Image.open(image_filename) # .convert('RGB')
+            with torch.no_grad():
+                image = transforms.ToTensor()(pil_image).cuda()
+            pil_image.close()
             self.last_image_index = index
             self.last_image = image
 
@@ -47,26 +48,22 @@ class ImagePatchTranslationLoader(torch.utils.data.Dataset):
         #half_src_size = src_size // 2
         #quarter_src_size = half_src_size // 2
 
-        image_w, image_h = image.size
+        channels, image_h, image_w = image.size()
 
         xa = random.randint(max_offset, image_w - src_size - max_offset)
         ya = random.randint(max_offset, image_h - src_size - max_offset)
-        patch_a = image.crop((xa, ya, xa + src_size, ya + src_size))
+        patch_a = image[:, ya:ya + src_size, xa:xa + src_size]
 
         x_offset = random.randint(-max_offset, max_offset) # inclusive.
         y_offset = random.randint(-max_offset, max_offset)
         xb = xa + x_offset
         yb = ya + y_offset
-        patch_b = image.crop((xb, yb, xb + src_size, yb + src_size))
-
-        with torch.no_grad():
-            patch_a = transforms.ToTensor()(patch_a)
-            patch_b = transforms.ToTensor()(patch_b)
+        patch_b = image[:, yb:yb + src_size, xb:xb + src_size]
 
         #if self.log:
         #   self.log.info('{}:{}\t{}:{}'.format((x_offset / self.patch_scale), round(cx,3), (y_offset / self.patch_scale), round(cy, 3)))
 
-        return patch_a, patch_b, torch.tensor([x_offset / max_offset, y_offset / max_offset, 0.5, 0.5])
+        return patch_a, patch_b, torch.tensor([-x_offset / max_offset, -y_offset / max_offset])
 
     def __len__(self):
         return len(self.image_filenames) * self.patches_per_image

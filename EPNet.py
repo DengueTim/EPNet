@@ -23,7 +23,7 @@ argParser.add_argument('--save_path', type=str, default='checkpoints', help='dir
 argParser.add_argument('--patch_size', type=int, default=33, help='Size of image patches to learn')
 argParser.add_argument('--max_offset', type=int, default=8, help='Usually < patch_size/4')
 argParser.add_argument('--patch_scale', type=int, default=4, help='Scaling up of image patches for sampling')
-argParser.add_argument('--local_cost_size', type=int, default='5')
+argParser.add_argument('--local_cost_radius', type=int, default='9')
 args = argParser.parse_args()
 
 log = utils.logger("EPNet")
@@ -117,51 +117,52 @@ def train(loader, model, optimizer, log):
     log.info('Epoch end average train loss Local = {}'.format(batch_loss_monitor.average() / args.train_batch_size))
 
 def test_accent(loader, model, log):
-    input_patch_size = args.patch_size
+    in_patch_size = args.patch_size
 
-    patch_cost_margin = args.local_cost_size // 2
-    patch_size = args.patch_size * args.patch_scale + patch_cost_margin * 2
-    max_offset = args.max_offset * args.patch_scale
+    sample_patch_size = in_patch_size * args.patch_scale
+    sample_max_offset = args.max_offset * args.patch_scale
 
-    axy1 = max_offset + patch_cost_margin
-    axy2 = patch_size - axy1;
+    axy1 = sample_patch_size // 2 - sample_max_offset
+    axy2 = sample_patch_size // 2 + sample_max_offset;
 
-    for batch_index, (sample_patch_a, sample_patch_b, y) in enumerate(loader):
-        sample_patch_a = sample_patch_a.float().cuda()
-        sample_patch_b = sample_patch_b.float().cuda()
-        y = y.cuda()
+    for batch_index, (sample_patch_a, sample_patch_b, gt) in enumerate(loader):
+        in_patch_a = F.interpolate(sample_patch_a, size=[in_patch_size, in_patch_size], mode='bilinear', align_corners=True)
+        in_patch_b = F.interpolate(sample_patch_b, size=[in_patch_size, in_patch_size], mode='bilinear', align_corners=True)
 
-        input_patch_a = sample_patch_a[:, :, patch_cost_margin:-patch_cost_margin, patch_cost_margin:-patch_cost_margin]
-        input_patch_b = sample_patch_b[:, :, patch_cost_margin:-patch_cost_margin, patch_cost_margin:-patch_cost_margin]
+        predictions = model(in_patch_a, in_patch_b)
 
-        input_patch_a = F.interpolate(input_patch_a, size=[input_patch_size, input_patch_size], mode='bilinear', align_corners=True)
-        input_patch_b = F.interpolate(input_patch_b, size=[input_patch_size, input_patch_size], mode='bilinear', align_corners=True)
+        prediction0_xy = predictions[0,0:2].clamp(-1,1) * sample_max_offset
 
-        predictions = model(input_patch_a, input_patch_b)
-        prediction = predictions[0,0:2].clamp(-1,1) * max_offset
-
-        log.info('GT: {}'.format(y[0]))
+        log.info('GT0: {}'.format(gt[0] * sample_max_offset))
         # loss...  from gradients of patches diffs
         with torch.no_grad():
             cropped_patch_a = sample_patch_a[0, :, axy1:axy2, axy1:axy2]
-            for step in range(0, 10):
-                opx, opy = prediction
-                cost, mini, maxi = utils.localCost(cropped_patch_a, sample_patch_b[0], opx.item(), opy.item(),
-                                                   local_size=args.local_cost_size)
-                better = torch.as_tensor(mini, dtype=torch.float).cuda()
-                better -= args.local_cost_size // 2
-                better += torch.floor(prediction)
-                better /= max_offset * args.patch_scale
-                prediction[0] = better[0]
-                prediction[1] = better[1]
-                log.info('Step {}: {}'.format(step, prediction))
+            log.info('Net Prediction: {}'.format(prediction0_xy))
 
-        break
+            for step in range(0, 10):
+                opx, opy = prediction0_xy
+                cost, mini, maxi = utils.localCost(cropped_patch_a, sample_patch_b[0], opx.item(), opy.item(),
+                                                   local_radius=args.local_cost_radius)
+                prediction0_xy[0] = mini[0]
+                prediction0_xy[1] = mini[1]
+                log.info('Step {}: {}'.format(step, prediction0_xy))
+                if torch.equal(prediction0_xy.cpu(), gt[0] * sample_max_offset):
+                    break;
+
+
+            fig = plt.figure(figsize=(24, 8), dpi=112)
+            ax1 = fig.add_subplot(131)
+            ax1.imshow(sample_patch_a[0].squeeze(0).cpu(), cmap='gray')
+            ax2 = fig.add_subplot(132)
+            ax2.imshow(sample_patch_b[0].squeeze(0).cpu(), cmap='gray')
+            ax3 = fig.add_subplot(133)
+            ax3.imshow(cost.cpu(), cmap='gray')
+            plt.show()
+
 
 def main():
     max_offset = args.max_offset * args.patch_scale
-    patch_cost_margin = args.local_cost_size // 2
-    sample_patch_size = args.patch_size * args.patch_scale + patch_cost_margin * 2
+    sample_patch_size = args.patch_size * args.patch_scale
 
     image_filenames = utils.getImageFilenamesWithPaths(args.train_image_dir)
 
@@ -169,7 +170,7 @@ def main():
         ImagePatchTranslationLoader(image_filenames, patches_per_image=(args.train_batch_size * 8),
                                     patch_size=sample_patch_size, max_offset=max_offset, log=log),
         batch_size=args.train_batch_size, num_workers=0, #args.train_batch_size,
-        pin_memory=True, drop_last=False
+        pin_memory=False, drop_last=False
     )
 
     model = ElParoNet(args.patch_size)

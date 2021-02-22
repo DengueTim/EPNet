@@ -27,7 +27,7 @@ class ElParoNet(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(128, 128),
             nn.LeakyReLU(),
-            nn.Linear(128,4)
+            nn.Linear(128,2)
         )
 
     def forward(self, patch_a, patch_b):

@@ -47,34 +47,37 @@ def getImageFilenamesWithPaths(dir, filename_extention='.png'):
     filenames = [filename for filename in os.listdir(dir) if filename.endswith(filename_extention)]
     return [os.path.join(dir, filename) for filename in filenames]
 
-def localCost(small, big, offset_x, offset_y, local_size=5):
+def localCost(small, big, offset_x, offset_y, local_radius=2):
     s_ch, ssize_x, ssize_y = small.size()
     b_ch, bsize_x, bsize_y = big.size()
 
+    csize_y = bsize_y - ssize_y
+    csize_x = bsize_x - ssize_x
+
     s_size = ssize_x * ssize_y
 
-    half_local_size = local_size // 2
-    ix = int(round(bsize_x / 2 - ssize_x / 2 + offset_x - half_local_size))
-    iy = int(round(bsize_y / 2 - ssize_y / 2 + offset_y - half_local_size))
-    c = torch.zeros((local_size, local_size)).cuda()
-    min_x = 0
-    min_y = 0
-    max_x = 0
-    max_y = 0
-    for y in range(0, local_size):
-        for x in range(0, local_size):
+    offset_0x = csize_x // 2 + offset_x
+    offset_0y = csize_y // 2 + offset_y
+    start_x = max(0, int(offset_0x - local_radius))
+    start_y = max(0, int(offset_0y - local_radius))
+    end_x = min(int(offset_0x + local_radius + 1), csize_x)
+    end_y = min(int(offset_0y + local_radius + 1), csize_y)
+    costs = torch.zeros((csize_y, csize_x)).cuda()
+    min_x = start_x
+    min_y = start_y
+    max_x = start_x
+    max_y = start_y
+    for y in range(0, csize_y): #start_y, end_y):
+        for x in range(0, csize_x): #start_x, end_x):
             # todo: weight towards patch center...
-            if ssize_y != 68 or ssize_x != 68 or iy < 0 or ix < 0 or iy + ssize_y > bsize_y or ix + ssize_x > bsize_x :
-                print("burf")
-            d = small - big[:, iy:iy + ssize_y, ix:ix + ssize_x]
-            s = d.abs().sum() / s_size
-            c[y, x] = s
-            if s.item() < c[min_y, min_x]:
+            cost = small - big[:, y:y + ssize_y, x:x + ssize_x]
+            cost = cost.abs().sum() / s_size
+            costs[y, x] = cost
+            if x >= start_x and x < end_x and cost < costs[min_y, min_x]:
                 min_x = x
                 min_y = y
-            if s.item() > c[max_y, max_x]:
+            if y >= start_y and y < end_y and cost > costs[max_y, max_x]:
                 max_x = x
                 max_y = y
-            ix += 1
-        iy += 1
-    return c, [min_x,min_y], [max_x, max_y]
+
+    return costs, (min_x - csize_x // 2, min_y - csize_y // 2), (max_x - csize_x // 2, max_y - csize_y // 2)
