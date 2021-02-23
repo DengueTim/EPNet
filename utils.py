@@ -43,7 +43,7 @@ class LossMonitor():
         self.count +=1
 
     def average(self):
-        return self.sum / self.count
+        return self.sum / self.count if self.count else 0
 
 def getImageFilenamesWithPaths(dir, filename_extention='.png'):
     filenames = [filename for filename in os.listdir(dir) if filename.endswith(filename_extention)]
@@ -93,3 +93,33 @@ def localCost(small, big, offset_x, offset_y, std_dev=8, n_samples = 300):
     return costs, \
            (min_x.item() - csize_x // 2, min_y.item() - csize_y // 2),\
            (max_x.item() - csize_x // 2, max_y.item() - csize_y // 2)
+
+
+def cost(small, big):
+    s_ch, ssize_x, ssize_y = small.size()
+    b_ch, bsize_x, bsize_y = big.size()
+
+    csize_y = bsize_y - ssize_y
+    csize_x = bsize_x - ssize_x
+
+    s_size = ssize_x * ssize_y
+
+    costs = np.zeros((csize_y, csize_x))
+    min_x = 0
+    min_y = 0
+    max_x = 0
+    max_y = 0
+    for y in range(0, csize_y):
+        for x in range(0, csize_x):
+            # todo: weight towards patch center...
+            cost = small - big[:, y:y + ssize_y, x:x + ssize_x]
+            cost = cost.abs().sum() / s_size
+            costs[y, x] = cost
+            if cost < costs[min_y, min_x]:
+                min_x = x
+                min_y = y
+            if cost > costs[max_y, max_x]:
+                max_x = x
+                max_y = y
+
+    return costs, (min_x - csize_x // 2, min_y - csize_y // 2), (max_x - csize_x // 2, max_y - csize_y // 2)
