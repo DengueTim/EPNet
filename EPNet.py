@@ -15,7 +15,7 @@ from models.ElParoNetModel import ElParoNet
 from loaders.ImagePatchTransalationLoader import ImagePatchTranslationLoader
 
 argParser = argparse.ArgumentParser(description="El Paro Net...")
-argParser.add_argument('--epochs', type=int, default=200, help='number of epochs do')
+argParser.add_argument('--epochs', type=int, default=20, help='number of epochs do')
 argParser.add_argument('--train_batch_size', type=int, default=32, help='training batch size')
 argParser.add_argument('--log_every', type=int, default=1000, help='Log losses after every n mini batches')
 argParser.add_argument('--train_image_dir', type=str, required=True, help='dir with training images in')
@@ -23,59 +23,50 @@ argParser.add_argument('--save_path', type=str, default='checkpoints', help='dir
 argParser.add_argument('--patch_size', type=int, default=33, help='Size of image patches to learn')
 argParser.add_argument('--max_offset', type=int, default=8, help='Usually < patch_size/4')
 argParser.add_argument('--patch_scale', type=int, default=4, help='Scaling up of image patches for sampling')
-argParser.add_argument('--local_cost_radius', type=int, default='9')
 args = argParser.parse_args()
 
 log = utils.logger("EPNet")
 
 def train(loader, model, optimizer, log):
-    input_patch_size = args.patch_size
+    in_patch_size = args.patch_size
+
     batch_loss_monitor = utils.LossMonitor()
     batch_loss_monitor_gt = utils.LossMonitor()
     loader_size = len(loader)
 
-    patch_cost_margin = args.local_cost_size // 2
-    patch_size = args.patch_size * args.patch_scale + patch_cost_margin * 2
-    max_offset = args.max_offset * args.patch_scale
+    sample_patch_size = in_patch_size * args.patch_scale
+    sample_max_offset = args.max_offset * args.patch_scale
 
-    axy1 = max_offset + patch_cost_margin
-    axy2 = patch_size - axy1;
+    axy1 = sample_patch_size // 2 - sample_max_offset
+    axy2 = sample_patch_size // 2 + sample_max_offset;
 
     model.train()
 
-    for batch_index, (sample_patch_a, sample_patch_b, y) in enumerate(loader):
-        sample_patch_a = sample_patch_a.float().cuda()
-        sample_patch_b = sample_patch_b.float().cuda()
-        y = y.cuda()
+    for batch_index, (sample_patch_a, sample_patch_b, gt) in enumerate(loader):
+        sample_patch_a = sample_patch_a.cuda()
+        sample_patch_b = sample_patch_b.cuda()
+
+        in_patch_a = F.interpolate(sample_patch_a, size=[in_patch_size, in_patch_size], mode='bilinear', align_corners=True)
+        in_patch_b = F.interpolate(sample_patch_b, size=[in_patch_size, in_patch_size], mode='bilinear', align_corners=True)
 
         optimizer.zero_grad()
 
-        input_patch_a = sample_patch_a[:, :, patch_cost_margin:-patch_cost_margin, patch_cost_margin:-patch_cost_margin]
-        input_patch_b = sample_patch_b[:, :, patch_cost_margin:-patch_cost_margin, patch_cost_margin:-patch_cost_margin]
-
-        input_patch_a = F.interpolate(input_patch_a, size=[input_patch_size, input_patch_size], mode='bilinear', align_corners=True)
-        input_patch_b = F.interpolate(input_patch_b, size=[input_patch_size, input_patch_size], mode='bilinear', align_corners=True)
-
-        predictions = model(input_patch_a, input_patch_b)
+        predictions = model(in_patch_a, in_patch_b)
+        predictions_xy = predictions[:,0:2].clamp(-1,1) * sample_max_offset
 
         # loss...  from gradients of patches diffs
-        better_predictions = torch.zeros_like(y)
+        better_xy = torch.zeros_like(predictions_xy)
         with torch.no_grad():
-            cropped_patch_a = sample_patch_a[:, :, axy1:axy2, axy1:axy2]
-            offset_predictions = predictions[:,0:2].clamp(-1,1) * max_offset
+            cropped_patch_a = sample_patch_a[0, :, axy1:axy2, axy1:axy2]
 
             for i in range(0, predictions.size()[0]):
-                opx, opy = offset_predictions[i]
-                cost, mini, maxi = utils.localCost(cropped_patch_a[i], sample_patch_b[i], opx.item(), opy.item(),
-                                    local_size=args.local_cost_size)
-                better = torch.as_tensor(mini, dtype=torch.float).cuda()
-                better -= args.local_cost_size // 2
-                better += torch.floor(offset_predictions[i])
-                better /= max_offset * args.patch_scale
-                better_predictions[i][0] = better[0]
-                better_predictions[i][1] = better[1]
+                opx, opy = predictions_xy[i]
+                cost, mini, maxi = utils.localCost(cropped_patch_a, sample_patch_b[0], opx.item(), opy.item(),
+                                                   std_dev=args.max_offset)
+                better_xy[i, 0] = mini[0] / sample_max_offset
+                better_xy[i, 1] = mini[1] / sample_max_offset
 
-        losses = predictions - better_predictions
+        losses = predictions - better_xy
         losses_abs = losses.abs() # losses * losses
         losses_batch = losses_abs.sum(dim=0)
         loss = losses_batch[0] + losses_batch[1] # + losses_batch[2] / 4 + losses_batch[3] / 4
@@ -84,7 +75,7 @@ def train(loader, model, optimizer, log):
 
         batch_loss_monitor.update(loss)
 
-        losses_gt = predictions - y
+        losses_gt = predictions - gt.cuda()
         losses_gt_abs = losses_gt.abs()  # losses * losses
         losses_gt_batch = losses_gt_abs.sum(dim=0)
 
@@ -95,7 +86,7 @@ def train(loader, model, optimizer, log):
                 batch_loss_monitor.last / args.train_batch_size,
                 batch_loss_monitor.average() / args.train_batch_size)
             ls = [round(p, 4) for p in losses[0].tolist()]
-            ys = [round(y, 4) for y in better_predictions[0].tolist()]
+            ys = [round(y, 4) for y in better_xy[0].tolist()]
             log.info('[{}/{}]\t{} losses[0] Local:{} better:{}'.format(
                 batch_index, loader_size, loss_str, ls, ys))
 
@@ -103,7 +94,7 @@ def train(loader, model, optimizer, log):
                 batch_loss_monitor_gt.last / args.train_batch_size,
                 batch_loss_monitor_gt.average() / args.train_batch_size)
             ls = [round(p, 4) for p in losses_gt[0].tolist()]
-            ys = [round(y, 4) for y in y[0].tolist()]
+            ys = [round(y, 4) for y in gt[0].tolist()]
             log.info('[{}/{}]\t{} losses[0] GT:{} y:{}'.format(
                 batch_index, loader_size, loss_str, ls, ys))
 
@@ -139,10 +130,10 @@ def test_accent(loader, model, log):
             cropped_patch_a = sample_patch_a[0, :, axy1:axy2, axy1:axy2]
             log.info('Net Prediction: {}'.format(prediction0_xy))
 
-            for step in range(0, 10):
+            for step in range(0, 20):
                 opx, opy = prediction0_xy
                 cost, mini, maxi = utils.localCost(cropped_patch_a, sample_patch_b[0], opx.item(), opy.item(),
-                                                   local_radius=args.local_cost_radius)
+                                                   std_dev=args.max_offset)
                 prediction0_xy[0] = mini[0]
                 prediction0_xy[1] = mini[1]
                 log.info('Step {}: {}'.format(step, prediction0_xy))
@@ -156,7 +147,7 @@ def test_accent(loader, model, log):
             ax2 = fig.add_subplot(132)
             ax2.imshow(sample_patch_b[0].squeeze(0).cpu(), cmap='gray')
             ax3 = fig.add_subplot(133)
-            ax3.imshow(cost.cpu(), cmap='gray')
+            ax3.imshow(cost, cmap='gray')
             plt.show()
 
 
@@ -169,8 +160,8 @@ def main():
     training_loader = torch.utils.data.DataLoader(
         ImagePatchTranslationLoader(image_filenames, patches_per_image=(args.train_batch_size * 8),
                                     patch_size=sample_patch_size, max_offset=max_offset, log=log),
-        batch_size=args.train_batch_size, num_workers=0, #args.train_batch_size,
-        pin_memory=False, drop_last=False
+        batch_size=args.train_batch_size, num_workers=args.train_batch_size,
+        pin_memory=True, drop_last=False
     )
 
     model = ElParoNet(args.patch_size)
@@ -200,8 +191,8 @@ def main():
 
     end_epoch = start_epoch + args.epochs
 
-    test_accent(training_loader, model, log)
-    return -1
+    # test_accent(training_loader, model, log)
+    # return -1
 
     for epoch in range(start_epoch, end_epoch):
         log.info('Starting epoch {} in range {} to {}'.format(epoch, start_epoch, end_epoch))

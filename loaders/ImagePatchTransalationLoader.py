@@ -34,7 +34,7 @@ class ImagePatchTranslationLoader(torch.utils.data.Dataset):
             image_filename = self.image_filenames[image_index]
             pil_image = Image.open(image_filename) # .convert('RGB')
             with torch.no_grad():
-                image = transforms.ToTensor()(pil_image).cuda()
+                image = transforms.ToTensor()(pil_image)
             pil_image.close()
             self.last_image_index = index
             self.last_image = image
