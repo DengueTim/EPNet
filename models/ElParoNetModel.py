@@ -5,32 +5,47 @@ import torch.nn as nn
 class ElParoNet(nn.Module):
     def __init__(self, patch_size):
         super().__init__()
-        input_size = patch_size * patch_size * 2
-        self.net = nn.Sequential(
-            nn.Linear(input_size,512),
+
+
+        self.feature_net = nn.Sequential(
+            nn.Conv2d(1, 64, kernel_size=7, stride=3),
+            nn.BatchNorm2d(64),
             nn.LeakyReLU(),
-            nn.Linear(512, 512),
+            nn.Conv2d(64, 64, kernel_size=3),
+            nn.BatchNorm2d(64),
             nn.LeakyReLU(),
-            nn.Linear(512,256),
-            nn.BatchNorm1d(256),
+            nn.Conv2d(64, 48, kernel_size=3),
+            nn.BatchNorm2d(48),
             nn.LeakyReLU(),
-            nn.Linear(256, 256),
+            nn.Conv2d(48, 32, kernel_size=3),
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU()
+        )
+
+        feature_size = int((patch_size - 6) / 3 - 2 - 2 - 2)
+        feature_size = feature_size * feature_size * 32
+        input_size = feature_size * 2
+
+        self.offset_net = nn.Sequential(
+            nn.Linear(input_size, input_size),
             nn.LeakyReLU(),
-            nn.Linear(256, 256),
+            nn.Linear(input_size, input_size),
             nn.LeakyReLU(),
-            nn.Linear(256, 256),
+            nn.Linear(input_size, input_size // 2),
+            nn.BatchNorm1d(input_size // 2),
             nn.LeakyReLU(),
-            nn.Linear(256,128),
-            nn.BatchNorm1d(128),
+            nn.Linear(input_size // 2, input_size // 2),
             nn.LeakyReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(input_size // 2, input_size // 2),
             nn.LeakyReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(input_size // 2, input_size // 4),
             nn.LeakyReLU(),
-            nn.Linear(128,2)
+            nn.Linear(input_size // 4, 2)
         )
 
     def forward(self, patch_a, patch_b):
-        patches = torch.cat((patch_a, patch_b),1)
+        features_a = self.feature_net(patch_a)
+        features_b = self.feature_net(patch_b)
+        patches = torch.cat((features_a, features_b),1)
         patches = patches.view(patches.size(0),-1)
-        return self.net(patches)
+        return self.offset_net(patches)

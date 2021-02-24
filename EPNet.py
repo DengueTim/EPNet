@@ -6,6 +6,7 @@ import torch.utils.data
 import os
 import os.path
 import re
+from multiprocessing import Process, Manager
 
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
@@ -85,13 +86,13 @@ def train(loader, model, optimizer, log):
         # batch_loss_monitor_gt.update(losses_gt_batch[0] + losses_gt_batch[1])
 
         if batch_index % args.log_every == 0:
-            loss_str = '{:.4f} ({:.4f})'.format(
+            batch_loss_str = '{:.4f} ({:.4f})'.format(
                 batch_loss_monitor.last / args.batch_size,
                 batch_loss_monitor.average() / args.batch_size)
-            ls = [round(p, 4) for p in losses[0].tolist()]
-            ys = [round(y, 4) for y in gt[0].tolist()]
-            log.info('[{}/{}]\t{} losses[0] {} y:{}'.format(
-                batch_index, loader_size, loss_str, ls, ys))
+            err0 = [round(p, 4) for p in losses[0].tolist()]
+            gts0 = [round(y, 4) for y in gt[0].tolist()]
+            log.info('[{}/{}]\t Batch Loss:{} Sample 0 Err:{} GT:{}'.format(
+                batch_index, loader_size, batch_loss_str, err0, gts0))
             #
             # loss_str = '{:.4f} ({:.4f})'.format(
             #     batch_loss_monitor_gt.last / args.batch_size,
@@ -180,18 +181,25 @@ def test(loader, model, log):
             ys = [round(y, 4) for y in gt[i].tolist()]
             log.info('Loss: {:.4f} GT:{} pred:{}'.format(losses_sample[i], ys, ls))
 
-            if losses_sample[i] > 0.05:
+            if True or losses_sample[i] > 0.05:
                 cropped_patch_a = sample_patch_a[i, :, axy1:axy2, axy1:axy2]
                 cost, mini, maxi = utils.cost(cropped_patch_a, sample_patch_b[i])
 
 
-                fig = plt.figure(figsize=(24, 8), dpi=112)
-                ax1 = fig.add_subplot(131)
-                ax1.imshow(sample_patch_a[i].squeeze(0).cpu(), cmap='gray')
-                ax2 = fig.add_subplot(132)
-                ax2.imshow(sample_patch_b[i].squeeze(0).cpu(), cmap='gray')
-                ax3 = fig.add_subplot(133)
-                ax3.imshow(cost, cmap='gray')
+                fig = plt.figure(figsize=(12, 12), dpi=112)
+                ax1 = fig.add_subplot(221)
+                ax1.imshow(in_patch_a[i].squeeze(0).cpu(), cmap='gray')
+                ax2 = fig.add_subplot(222)
+                ax2.imshow(in_patch_b[i].squeeze(0).cpu(), cmap='gray')
+                ax3 = fig.add_subplot(223)
+                ax3.imshow(sample_patch_a[i].squeeze(0).cpu(), cmap='gray')
+                ax4 = fig.add_subplot(224)
+                ax4.imshow(cost, cmap='gray')
+                p = gt[i] * sample_max_offset + sample_max_offset + args.patch_scale // 2
+                ax4.plot(p[0], p[1], marker='x', color="green")
+                p = predictions[i].cpu().detach() * sample_max_offset + sample_max_offset + args.patch_scale // 2
+                ax4.plot(p[0], p[1], marker='x', color="red")
+                #ax3.plot(0, 1, marker='x', color="blue")
                 plt.show()
 
 def main():
@@ -200,8 +208,13 @@ def main():
 
     image_filenames = utils.getImageFilenamesWithPaths(args.image_dir)
 
+    # Fix for OOM error due to copy on write of string array shared between workers.
+    # See https://github.com/pytorch/pytorch/issues/13246#issuecomment-612396143
+    manager = Manager()
+    shared_image_filenames = manager.list(image_filenames)
+
     image_loader = torch.utils.data.DataLoader(
-        ImagePatchTranslationLoader(image_filenames, patches_per_image=(args.batch_size * 8),
+        ImagePatchTranslationLoader(shared_image_filenames, patches_per_image=(args.batch_size * 8),
                                     patch_size=sample_patch_size, max_offset=max_offset, log=log),
         batch_size=args.batch_size, num_workers=16,
         pin_memory=True, drop_last=False
