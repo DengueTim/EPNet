@@ -6,7 +6,6 @@ class ElParoNet(nn.Module):
     def __init__(self, patch_size):
         super().__init__()
 
-
         self.feature_net = nn.Sequential(
             nn.Conv2d(1, 64, kernel_size=7, stride=3),
             nn.BatchNorm2d(64),
@@ -40,7 +39,7 @@ class ElParoNet(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(input_size // 2, input_size // 4),
             nn.LeakyReLU(),
-            nn.Linear(input_size // 4, 2)
+            nn.Linear(input_size // 4, 6)
         )
 
     def forward(self, patch_a, patch_b):

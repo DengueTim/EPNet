@@ -1,9 +1,8 @@
 import os
 import os.path
 import logging
-import random
 import numpy as np
-from itertools import groupby
+
 
 def logger(name):
     logger = logging.getLogger(name)
@@ -31,23 +30,10 @@ def logger(name):
     # logger.addHandler(file_handle)
 
 
-class LossMonitor():
-    def __init__(self):
-        self.last = 0.0
-        self.sum = 0.0
-        self.count = 0
-
-    def update(self, loss):
-        self.last = loss
-        self.sum += loss
-        self.count +=1
-
-    def average(self):
-        return self.sum / self.count if self.count else 0
-
 def getImageFilenamesWithPaths(dir, filename_extention='.png'):
     filenames = [filename for filename in os.listdir(dir) if filename.endswith(filename_extention)]
     return [os.path.join(dir, filename) for filename in filenames]
+
 
 def localCost(small, big, offset_x, offset_y, std_dev=8, n_samples = 300):
     s_ch, ssize_x, ssize_y = small.size()
@@ -123,3 +109,5 @@ def cost(small, big):
                 max_y = y
 
     return costs, (min_x - csize_x // 2, min_y - csize_y // 2), (max_x - csize_x // 2, max_y - csize_y // 2)
+
+

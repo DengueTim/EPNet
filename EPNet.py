@@ -1,23 +1,24 @@
 import argparse
 import torch
-import torch.nn as nn
-import torch.optim as optim
 import torch.utils.data
-import os
-import os.path
-import re
-from multiprocessing import Process, Manager
+from multiprocessing import Manager
 
+import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+from matplotlib.patches import Ellipse
 
 import utils
+from models.ElParoNetModelSmallest import ElParoNetSmallest
+from models.ElParoNetModelSmaller import ElParoNetSmaller
 from models.ElParoNetModel import ElParoNet
+from models.ElParoNetModelBigger import ElParoNetBigger
+from models.Trainable import Trainable
 from loaders.ImagePatchTransalationLoader import ImagePatchTranslationLoader
 
 argParser = argparse.ArgumentParser(description="El Paro Net...")
 argParser.add_argument('--epochs', type=int, default=100, help='number of epochs do')
-argParser.add_argument('--batch_size', type=int, default=32, help='training batch size')
+argParser.add_argument('--batch_size', type=int, default=64, help='training batch size')
 argParser.add_argument('--log_every', type=int, default=1000, help='Log losses after every n mini batches')
 argParser.add_argument('--image_dir', type=str, required=True, help='dir with train/test images in')
 argParser.add_argument('--save_path', type=str, default='checkpoints', help='dir to save model during training.')
@@ -29,11 +30,10 @@ args = argParser.parse_args()
 
 log = utils.logger("EPNet")
 
-def train(loader, model, optimizer, log):
+
+def train(loader, trainables):
     in_patch_size = args.patch_size
 
-    batch_loss_monitor = utils.LossMonitor()
-    # batch_loss_monitor_gt = utils.LossMonitor()
     loader_size = len(loader)
 
     # sample_patch_size = in_patch_size * args.patch_scale
@@ -42,7 +42,8 @@ def train(loader, model, optimizer, log):
     # axy1 = sample_patch_size // 2 - sample_max_offset
     # axy2 = sample_patch_size // 2 + sample_max_offset;
 
-    model.train()
+    for trainable in trainables:
+        trainable.train()
 
     for batch_index, (sample_patch_a, sample_patch_b, gt) in enumerate(loader):
         sample_patch_a = sample_patch_a.cuda()
@@ -51,67 +52,70 @@ def train(loader, model, optimizer, log):
         in_patch_a = F.interpolate(sample_patch_a, size=[in_patch_size, in_patch_size], mode='bilinear', align_corners=True)
         in_patch_b = F.interpolate(sample_patch_b, size=[in_patch_size, in_patch_size], mode='bilinear', align_corners=True)
 
-        optimizer.zero_grad()
+        gt_xy = gt.cuda()
 
-        predictions = model(in_patch_a, in_patch_b)
-        # predictions_xy = predictions[:,0:2].clamp(-1,1) * sample_max_offset
-        #
-        # # loss...  from gradients of patches diffs
-        # better_xy = torch.zeros_like(predictions_xy)
-        # with torch.no_grad():
-        #     cropped_patch_a = sample_patch_a[0, :, axy1:axy2, axy1:axy2]
-        #
-        #     for i in range(0, predictions.size()[0]):
-        #         opx, opy = predictions_xy[i]
-        #         cost, mini, maxi = utils.localCost(cropped_patch_a, sample_patch_b[0], opx.item(), opy.item(),
-        #                                            std_dev=args.max_offset)
-        #         better_xy[i, 0] = mini[0] / sample_max_offset
-        #         better_xy[i, 1] = mini[1] / sample_max_offset
+        for trainable in trainables:
+            trainable.zero_grad()
 
-        #losses = predictions - better_xy
+            predictions = trainable(in_patch_a, in_patch_b)
 
-        losses = predictions - gt.cuda()
-        losses_2 = losses * losses
-        losses_batch = losses_2.sum(dim=0)
-        loss = losses_batch[0] + losses_batch[1] # + losses_batch[2] / 4 + losses_batch[3] / 4
-        loss.backward()
-        optimizer.step()
+            losses_xys = predictions[:, :2] - gt_xy
+            losses_xys_2 = losses_xys * losses_xys
+            losses_xys_batch = losses_xys_2.sum()
 
-        batch_loss_monitor.update(loss)
+            if losses_xys_batch / args.batch_size > 0.05:
+                losses_confidences = predictions[:,2:4] * 0
+                losses_confidence_batch = 0 #losses_confidences.sum()
+            else:
+                # Try and predict the loss itself...
+                losses_confidences = predictions[:, 2:4] - losses_xys.abs()
+                losses_confidences_2 = losses_confidences * losses_confidences
+                losses_confidence_batch = losses_confidences_2.sum()
 
-        # losses_gt = predictions - gt.cuda()
-        # losses_gt_abs = losses_gt.abs()  # losses * losses
-        # losses_gt_batch = losses_gt_abs.sum(dim=0)
-        #
-        # batch_loss_monitor_gt.update(losses_gt_batch[0] + losses_gt_batch[1])
+            loss = 0.7 * losses_xys_batch + 0.3 * losses_confidence_batch
+            loss.backward()
+            nn.utils.clip_grad_norm_(trainable.model.parameters(), 0.5)
+            trainable.step()
 
-        if batch_index % args.log_every == 0:
-            batch_loss_str = '{:.4f} ({:.4f})'.format(
-                batch_loss_monitor.last / args.batch_size,
-                batch_loss_monitor.average() / args.batch_size)
-            err0 = [round(p, 4) for p in losses[0].tolist()]
-            gts0 = [round(y, 4) for y in gt[0].tolist()]
-            log.info('[{}/{}]\t Batch Loss:{} Sample 0 Err:{} GT:{}'.format(
-                batch_index, loader_size, batch_loss_str, err0, gts0))
+            trainable.update_batch_loss(loss)
+
+            # losses_gt = predictions - gt.cuda()
+            # losses_gt_abs = losses_gt.abs()  # losses * losses
+            # losses_gt_batch = losses_gt_abs.sum(dim=0)
             #
-            # loss_str = '{:.4f} ({:.4f})'.format(
-            #     batch_loss_monitor_gt.last / args.batch_size,
-            #     batch_loss_monitor_gt.average() / args.batch_size)
-            # ls = [round(p, 4) for p in losses_gt[0].tolist()]
-            # ys = [round(y, 4) for y in gt[0].tolist()]
-            # log.info('[{}/{}]\t{} losses[0] GT:{} y:{}'.format(
-            #     batch_index, loader_size, loss_str, ls, ys))
+            # batch_loss_monitor_gt.update(losses_gt_batch[0] + losses_gt_batch[1])
 
-            # if losses_abs[0, 0] > 0.2 or losses_abs[0, 1] > 0.2:
-            #     fig, ax = plt.subplots(nrows=1, ncols=2)
-            #     ax.flat[0].imshow(patch_a[0].cpu(), cmap='gray')
-            #     ax.flat[1].imshow(patch_b[0].cpu(), cmap='gray')
-            #     plt.show()
+            if batch_index % args.log_every == 0:
+                if trainable == trainables[0]:
+                    gt0 = [round(y, 4) for y in gt[0].tolist()]
+                    log.info('Batch:{}/{} GT0:{} '.format(batch_index, loader_size, gt0))
+                batch_loss_str = '{:.4f} ({:.4f})'.format(
+                    trainable.get_last_batch_loss() / args.batch_size,
+                    trainable.get_average_batch_loss() / args.batch_size)
+                err0xy = [round(p, 4) for p in losses_xys[0].tolist()]
+                pred0err = [round(p, 4) for p in predictions[0, 2:4].tolist()]
+                log.info('\tLoss:{}\tSample0 Err XY:{} PredErr:{}\tModel:{}{}'.format(
+                    batch_loss_str, err0xy, pred0err, trainable.get_model_name(), trainable.get_epoch()))
+                #
+                # loss_str = '{:.4f} ({:.4f})'.format(
+                #     batch_loss_monitor_gt.last / args.batch_size,
+                #     batch_loss_monitor_gt.average() / args.batch_size)
+                # ls = [round(p, 4) for p in losses_gt[0].tolist()]
+                # ys = [round(y, 4) for y in gt[0].tolist()]
+                # log.info('[{}/{}]\t{} losses[0] GT:{} y:{}'.format(
+                #     batch_index, loader_size, loss_str, ls, ys))
 
-    log.info('Epoch end average train loss = {}'.format(batch_loss_monitor.average() / args.batch_size))
-    #log.info('Epoch end average train loss GT = {}'.format(batch_loss_monitor_gt.average() / args.batch_size))
+                # if losses_abs[0, 0] > 0.2 or losses_abs[0, 1] > 0.2:
+                #     fig, ax = plt.subplots(nrows=1, ncols=2)
+                #     ax.flat[0].imshow(patch_a[0].cpu(), cmap='gray')
+                #     ax.flat[1].imshow(patch_b[0].cpu(), cmap='gray')
+                #     plt.show()
 
-def test_accent(loader, model, log):
+    for trainable in trainables:
+        log.info('Epoch end average train loss = {}'.format(trainable.get_average_batch_loss() / args.batch_size))
+
+
+def test_accent(loader, trainable, log):
     in_patch_size = args.patch_size
 
     sample_patch_size = in_patch_size * args.patch_scale
@@ -124,7 +128,7 @@ def test_accent(loader, model, log):
         in_patch_a = F.interpolate(sample_patch_a, size=[in_patch_size, in_patch_size], mode='bilinear', align_corners=True)
         in_patch_b = F.interpolate(sample_patch_b, size=[in_patch_size, in_patch_size], mode='bilinear', align_corners=True)
 
-        predictions = model(in_patch_a, in_patch_b)
+        predictions = trainable(in_patch_a, in_patch_b)
 
         prediction0_xy = predictions[0,0:2].clamp(-1,1) * sample_max_offset
 
@@ -154,7 +158,8 @@ def test_accent(loader, model, log):
             ax3.imshow(cost, cmap='gray')
             plt.show()
 
-def test(loader, model, log):
+
+def test(loader, trainable, log):
     in_patch_size = args.patch_size
 
     sample_patch_size = in_patch_size * args.patch_scale
@@ -163,25 +168,26 @@ def test(loader, model, log):
     axy1 = sample_patch_size // 2 - sample_max_offset
     axy2 = sample_patch_size // 2 + sample_max_offset
 
-    for batch_index, (sample_patch_a, sample_patch_b, gt) in enumerate(loader):
+    for batch_index, (sample_patch_a, sample_patch_b, sample_gt) in enumerate(loader):
         sample_patch_a = sample_patch_a.cuda()
         sample_patch_b = sample_patch_b.cuda()
 
         in_patch_a = F.interpolate(sample_patch_a, size=[in_patch_size, in_patch_size], mode='bilinear', align_corners=True)
         in_patch_b = F.interpolate(sample_patch_b, size=[in_patch_size, in_patch_size], mode='bilinear', align_corners=True)
 
-        predictions = model(in_patch_a, in_patch_b)
+        predictions = trainable(in_patch_a, in_patch_b)
 
-        losses = predictions - gt.cuda()
-        losses_2 = losses * losses
-        losses_sample = losses_2.sum(dim=1)
+        losses_xys = predictions[:, :2] - sample_gt.cuda()
+        losses_xys_2 = losses_xys * losses_xys
+        losses_xys_sample = losses_xys_2.sum(dim=1)
 
         for i in range(0, predictions.size()[0]):
-            ls = [round(p, 4) for p in losses[i].tolist()]
-            ys = [round(y, 4) for y in gt[i].tolist()]
-            log.info('Loss: {:.4f} GT:{} pred:{}'.format(losses_sample[i], ys, ls))
+            gts = [round(y, 4) for y in sample_gt[i].tolist()]
+            xys = [round(p, 4) for p in losses_xys[i].tolist()]
+            ps = [round(p, 4) for p in predictions[i].tolist()]
+            log.info('Loss: {:.4f} GT:{} XY loss:{} Prediction:{}'.format(losses_xys_sample[i], gts, xys, ps))
 
-            if True or losses_sample[i] > 0.05:
+            if True or losses_xys_sample[i] > 0.05:
                 cropped_patch_a = sample_patch_a[i, :, axy1:axy2, axy1:axy2]
                 cost, mini, maxi = utils.cost(cropped_patch_a, sample_patch_b[i])
 
@@ -195,11 +201,15 @@ def test(loader, model, log):
                 ax3.imshow(sample_patch_a[i].squeeze(0).cpu(), cmap='gray')
                 ax4 = fig.add_subplot(224)
                 ax4.imshow(cost, cmap='gray')
-                p = gt[i] * sample_max_offset + sample_max_offset + args.patch_scale // 2
-                ax4.plot(p[0], p[1], marker='x', color="green")
-                p = predictions[i].cpu().detach() * sample_max_offset + sample_max_offset + args.patch_scale // 2
-                ax4.plot(p[0], p[1], marker='x', color="red")
-                #ax3.plot(0, 1, marker='x', color="blue")
+                gt = sample_gt[i] * sample_max_offset + sample_max_offset + args.patch_scale // 2
+                ax4.plot(gt[0], gt[1], marker='x', color="green")
+                xy = predictions[i, :2].cpu().detach() * sample_max_offset + sample_max_offset + args.patch_scale // 2
+                ax4.plot(xy[0], xy[1], marker='x', color="red")
+                err = predictions[i, 2:4].cpu().detach().abs() * sample_max_offset * 4
+                ax4.add_patch(Ellipse((xy[0], xy[1]), width=err[0], height=err[1],
+                     edgecolor='red',
+                     facecolor='none',
+                     linewidth=1))
                 plt.show()
 
 def main():
@@ -214,60 +224,39 @@ def main():
     shared_image_filenames = manager.list(image_filenames)
 
     image_loader = torch.utils.data.DataLoader(
-        ImagePatchTranslationLoader(shared_image_filenames, patches_per_image=(args.batch_size * 8),
+        ImagePatchTranslationLoader(shared_image_filenames, patches_per_image=(args.batch_size * 4),
                                     patch_size=sample_patch_size, max_offset=max_offset, log=log),
-        batch_size=args.batch_size, num_workers=16,
+        batch_size=args.batch_size, num_workers=12,
         pin_memory=True, drop_last=False
     )
 
-    model = ElParoNet(args.patch_size)
-    model = nn.DataParallel(model).cuda()
-    optimizer = optim.Adam(model.parameters())
-    parameter_count = sum([p.data.nelement() for p in model.parameters()])
-    log.info('Model parameter count: {}'.format(parameter_count))
+    trainables = [
+        Trainable(ElParoNetSmallest(args.patch_size), log, lr=0.0002),
+        Trainable(ElParoNetSmaller(args.patch_size), log, lr=0.0002),
+        Trainable(ElParoNet(args.patch_size), log, lr=0.0002),
+        Trainable(ElParoNetBigger(args.patch_size), log, lr=0.0002)
+    ]
 
-    start_epoch = 1
 
-    last_saved_checkpoint = -1
-    if os.path.isdir(args.save_path):
-        for filename in os.listdir(args.save_path):
-            match = re.match('cp(\d+).pth', filename)
-            if match and last_saved_checkpoint < int(match.group(1)):
-                last_saved_checkpoint = int(match.group(1))
-    else:
-        os.mkdir(args.save_path)
-
-    if last_saved_checkpoint >= 0:
-        model_save_path = args.save_path + '/cp' + str(last_saved_checkpoint) + '.pth'
-        checkpoint = torch.load(model_save_path)
-        start_epoch = checkpoint['epoch'] + 1
-        model.load_state_dict(checkpoint['state_dict'], strict=True)
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        log.info("=> loaded checkpoint {}".format(last_saved_checkpoint))
-
-    end_epoch = start_epoch + args.epochs
+    for trainable in trainables:
+        trainable.load(args.save_path)
 
     # test_accent(training_loader, model, log)
     # return -1
 
     if args.test is True:
-        if start_epoch == 1:
+        if trainables[3].get_epoch() == 1:
             log.error('No trained model. Give --save_path with valid checkpoint file(s)')
             return
-        test(image_loader, model, log)
+        test(image_loader, trainables[3], log)
     else:
-        for epoch in range(start_epoch, end_epoch):
-            log.info('Starting epoch {} in range {} to {}'.format(epoch, start_epoch, end_epoch))
-            train(image_loader, model, optimizer, log)
+        for epoch in range(1, args.epochs + 1):
+            log.info('Starting epoch {} of {}'.format(epoch, args.epochs))
+            train(image_loader, trainables)
 
-            model_save_path = args.save_path + '/cp' + str(epoch) + '.pth'
-            torch.save({
-                'epoch': epoch,
-                'state_dict': model.state_dict(),
-                'optimizer': optimizer.state_dict()},
-                model_save_path
-                )
-            log.info('Saved model for epoch {} to {}'.format(epoch, model_save_path))
+            for trainable in trainables:
+                trainable.save(args.save_path)
+
 
 if __name__ == '__main__':
     main()
