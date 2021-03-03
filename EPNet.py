@@ -237,7 +237,6 @@ def main():
         Trainable(ElParoNetBigger(args.patch_size), log, lr=0.0002)
     ]
 
-
     for trainable in trainables:
         trainable.load(args.save_path)
 

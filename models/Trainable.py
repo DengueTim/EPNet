@@ -8,8 +8,13 @@ import re
 
 
 class Trainable():
-    def __init__(self, model, log, lr=1e-3):
-        #model = nn.parallel.DistributedDataParallel(model)
+    def __init__(self, model, log, lr=1e-3, data_parallel=False):
+        self.model_name = model.__class__.__name__
+
+        if data_parallel:
+            model = nn.parallel.DataParallel(model)
+            #model = nn.parallel.DistributedDataParallel(model)
+
         model = model.cuda()
         self.model = model
         self.optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -25,7 +30,7 @@ class Trainable():
         self.batch_counter = 0
 
     def get_model_name(self):
-        return self.model.__class__.__name__
+        return self.model_name
 
     def train(self):
         self.model.train()

@@ -2,6 +2,7 @@ import os
 import os.path
 import logging
 import numpy as np
+import cv2
 
 
 def logger(name):
@@ -34,6 +35,10 @@ def getImageFilenamesWithPaths(dir, filename_extention='.png'):
     filenames = [filename for filename in os.listdir(dir) if filename.endswith(filename_extention)]
     return [os.path.join(dir, filename) for filename in filenames]
 
+def get_image_filename_pairs_for_flow_kitti(dir):
+    filenames = [filename for filename in os.listdir(dir) if filename.endswith('.png')]
+    filenames = [os.path.join(dir, filename) for filename in filenames]
+    return zip(filenames[:-1], filenames[1:])
 
 def localCost(small, big, offset_x, offset_y, std_dev=8, n_samples = 300):
     s_ch, ssize_x, ssize_y = small.size()
@@ -110,4 +115,13 @@ def cost(small, big):
 
     return costs, (min_x - csize_x // 2, min_y - csize_y // 2), (max_x - csize_x // 2, max_y - csize_y // 2)
 
+def flow_to_bgr(flow):
+    # Use Hue, Saturation, Value colour model
+    channels, height, width = flow.shape
+    hsv = np.zeros([height, width, 3], dtype=np.uint8)
+    hsv[..., 1] = 255
 
+    mag, ang = cv2.cartToPolar(flow[0, ...].numpy(), flow[1, ...].numpy())
+    hsv[..., 0] = ang * 180 / np.pi / 2
+    hsv[..., 2] = cv2.normalize(np.power(mag,1/4), None, 0, 255, cv2.NORM_MINMAX)
+    return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
