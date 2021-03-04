@@ -114,14 +114,3 @@ def cost(small, big):
                 max_y = y
 
     return costs, (min_x - csize_x // 2, min_y - csize_y // 2), (max_x - csize_x // 2, max_y - csize_y // 2)
-
-def flow_to_bgr(flow):
-    # Use Hue, Saturation, Value colour model
-    channels, height, width = flow.shape
-    hsv = np.zeros([height, width, 3], dtype=np.uint8)
-    hsv[..., 1] = 255
-
-    mag, ang = cv2.cartToPolar(flow[0, ...].numpy(), flow[1, ...].numpy())
-    hsv[..., 0] = ang * 180 / np.pi / 2
-    hsv[..., 2] = cv2.normalize(np.power(mag,1/4), None, 0, 255, cv2.NORM_MINMAX)
-    return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)

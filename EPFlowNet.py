@@ -10,7 +10,8 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 
 import utils
-from loaders.SceneFlowFilenames import get_filenames_for_sceneflow_driving
+import color_flow
+import loaders.SceneFlowFilenames
 from loaders.SceneFlowLoader import SceneFlowLoader
 from models.ElParoFlowNetModel import ElParoFlowNet
 from models.Trainable import Trainable
@@ -40,17 +41,18 @@ def train(loader, trainables):
         flow_a2b_gt = flow_a2b_gt.cuda()
         flow_b2a_gt = flow_b2a_gt.cuda()
 
+        image_a_x15 = F.interpolate(image_a, scale_factor=1 / 15, mode='bilinear', align_corners=True)
+        image_b_x15 = F.interpolate(image_b, scale_factor=1 / 15, mode='bilinear', align_corners=True)
+
         boarder = 9 * 15
         flow_a2b_gt_cropped = flow_a2b_gt[:, :, boarder:-boarder, boarder:-boarder]
-
-        image_a_x16 = F.interpolate(image_a, scale_factor=1 / 15, mode='bilinear', align_corners=True)
-        image_b_x16 = F.interpolate(image_b, scale_factor=1 / 15, mode='bilinear', align_corners=True)
+        flow_a2b_gt_cropped_x15 = F.interpolate(flow_a2b_gt_cropped, scale_factor=1 / 15, mode='area')
 
         for trainable in trainables:
             trainable.zero_grad()
 
-            flow_prediction = trainable(image_a_x16, image_b_x16)
-            flow_prediction = F.interpolate(flow_prediction, scale_factor=15, mode='bilinear', align_corners=True)
+            flow_prediction_x15 = trainable(image_a_x15, image_b_x15)
+            flow_prediction = F.interpolate(flow_prediction_x15, scale_factor=15, mode='bilinear', align_corners=True)
 
             # fig = plt.figure(figsize=(18, 12), dpi=112)
             # ax1 = fig.add_subplot(221)
@@ -59,15 +61,15 @@ def train(loader, trainables):
             # ax2.imshow(image_b[0].squeeze(0).cpu(), cmap='gray')
             # ax3 = fig.add_subplot(223)
             # # ax3.hist(torch.flatten(flow_a2b_gt[0][0].detach().cpu()).numpy(), bins=100)
-            # ax3.imshow(utils.flow_to_bgr(flow_a2b_gt[0].detach().squeeze(0).cpu()))
+            # ax3.imshow(color_flow.flow_to_rgb(flow_a2b_gt_cropped_x15[0].detach().squeeze(0).cpu()))
             # ax4 = fig.add_subplot(224)
             # # ax4.hist(torch.flatten(flow_a2b_gt[0][1].detach().cpu()).numpy(), bins=100)
-            # ax4.imshow(utils.flow_to_bgr(flow_prediction[0].detach().squeeze(0).cpu()))
+            # ax4.imshow(color_flow.flow_to_rgb(flow_prediction_x15[0].detach().squeeze(0).cpu()))
             # plt.show()
 
             mask = torch.ones_like(flow_a2b_gt_cropped, dtype=bool)
             count = mask[:, 0, :, :].sum(dim=2).sum(dim=1)
-            difference = flow_a2b_gt_cropped - flow_prediction
+            difference = flow_a2b_gt_cropped_x15 - flow_prediction_x15
             per_pixel_losses = torch.sqrt(torch.sum(torch.pow(difference, 2), dim=1))
             loss = torch.sum(per_pixel_losses) / 485884
             loss.backward()
@@ -89,7 +91,8 @@ def test(loader, trainable, log):
 
 
 def main():
-    scene_flow_filenames = get_filenames_for_sceneflow_driving(args.scene_flow_dir + '/Driving')
+    scene_flow_filenames = loaders.SceneFlowFilenames.get_filenames_for_sceneflow_driving(args.scene_flow_dir + '/Driving')
+    scene_flow_filenames.extend(loaders.SceneFlowFilenames.get_filenames_for_sceneflow_monkaa(args.scene_flow_dir + '/Monkaa'))
 
     # Fix for OOM error due to copy on write of string array shared between workers.
     # See https://github.com/pytorch/pytorch/issues/13246#issuecomment-612396143
@@ -99,7 +102,7 @@ def main():
     image_pair_loader = torch.utils.data.DataLoader(
         SceneFlowLoader(shared_scene_flow_filenames, log=log),
         batch_size=args.batch_size, num_workers=24,
-        pin_memory=True, drop_last=False
+        pin_memory=True, drop_last=False, shuffle=True
     )
 
     trainables = [
