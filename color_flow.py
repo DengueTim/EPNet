@@ -47,7 +47,7 @@ def _make_color_wheel():
 _color_wheel = _make_color_wheel()
 
 
-def flow_to_rgb(flo_data):
+def flow_to_rgb(flo_data, rad_normaliser=None):
     """
         :param flo_data: [2, h, w] ndarray (flow data)
         :returns: [h, w, 3] ndarray (rgb data) using color wheel
@@ -63,10 +63,19 @@ def flow_to_rgb(flo_data):
     rgb_data = np.empty([h, w, 3], dtype=np.uint8)
 
     rad = np.sqrt(fu ** 2 + fv ** 2)
-    max_rad = np.max(rad)
-    rad /= max_rad
-    fv /= max_rad
-    fu /= max_rad
+    if rad_normaliser is None:
+        rad_normaliser = np.max(rad)
+        rad /= rad_normaliser
+        fv /= rad_normaliser
+        fu /= rad_normaliser
+    else:
+        rad /= rad_normaliser
+        rad = np.clip(rad, 0.0, 1.0)
+        fv /= rad_normaliser
+        rad = np.clip(rad, -1.0, 1.0)
+        fu /= rad_normaliser
+        rad = np.clip(rad, -1.0, 1.0)
+
     a = np.arctan2(-fv, -fu) / np.pi
     fk = (a + 1) / 2 * (n_cols - 1)  # -1~1 mapped to 1~n_cols
     k0 = fk.astype(np.uint8)

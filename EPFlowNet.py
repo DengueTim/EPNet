@@ -54,24 +54,25 @@ def train(loader, trainables):
             flow_prediction_x15 = trainable(image_a_x15, image_b_x15)
             flow_prediction = F.interpolate(flow_prediction_x15, scale_factor=15, mode='bilinear', align_corners=True)
 
-            # fig = plt.figure(figsize=(18, 12), dpi=112)
-            # ax1 = fig.add_subplot(221)
-            # ax1.imshow(image_a[0].squeeze(0).cpu(), cmap='gray')
-            # ax2 = fig.add_subplot(222)
-            # ax2.imshow(image_b[0].squeeze(0).cpu(), cmap='gray')
-            # ax3 = fig.add_subplot(223)
-            # # ax3.hist(torch.flatten(flow_a2b_gt[0][0].detach().cpu()).numpy(), bins=100)
-            # ax3.imshow(color_flow.flow_to_rgb(flow_a2b_gt_cropped_x15[0].detach().squeeze(0).cpu()))
-            # ax4 = fig.add_subplot(224)
-            # # ax4.hist(torch.flatten(flow_a2b_gt[0][1].detach().cpu()).numpy(), bins=100)
-            # ax4.imshow(color_flow.flow_to_rgb(flow_prediction_x15[0].detach().squeeze(0).cpu()))
-            # plt.show()
+            fig = plt.figure(figsize=(18, 12), dpi=112)
+            ax1 = fig.add_subplot(221)
+            ax1.imshow(image_a[0].squeeze(0).cpu(), cmap='gray')
+            ax2 = fig.add_subplot(222)
+            ax2.imshow(image_b[0].squeeze(0).cpu(), cmap='gray')
+            ax3 = fig.add_subplot(223)
+            # ax3.hist(torch.flatten(flow_a2b_gt_cropped_x15[0][0].detach().cpu()).numpy(), bins=100)
+            ax3.imshow(color_flow.flow_to_rgb(flow_a2b_gt_cropped_x15[0].detach().squeeze(0).cpu(), rad_normaliser=50))
+            ax4 = fig.add_subplot(224)
+            # ax4.hist(torch.flatten(flow_a2b_gt_cropped_x15[0][1].detach().cpu()).numpy(), bins=100)
+            ax4.imshow(color_flow.flow_to_rgb(flow_prediction_x15[0].detach().squeeze(0).cpu(), rad_normaliser=50))
+            plt.show()
 
-            mask = torch.ones_like(flow_a2b_gt_cropped, dtype=bool)
+            mask = torch.ones_like(flow_a2b_gt_cropped_x15, dtype=bool)
             count = mask[:, 0, :, :].sum(dim=2).sum(dim=1)
             difference = flow_a2b_gt_cropped_x15 - flow_prediction_x15
             per_pixel_losses = torch.sqrt(torch.sum(torch.pow(difference, 2), dim=1))
-            loss = torch.sum(per_pixel_losses) / 485884
+            mask_size = mask.size()
+            loss = torch.sum(per_pixel_losses) / (mask_size[0] * mask_size[2] * mask_size[3])
             loss.backward()
             trainable.step()
             trainable.update_batch_loss(loss)
@@ -101,7 +102,7 @@ def main():
 
     image_pair_loader = torch.utils.data.DataLoader(
         SceneFlowLoader(shared_scene_flow_filenames, log=log),
-        batch_size=args.batch_size, num_workers=24,
+        batch_size=args.batch_size, num_workers=0, #24,
         pin_memory=True, drop_last=False, shuffle=True
     )
 
