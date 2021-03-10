@@ -17,7 +17,14 @@ from models.ElParoFlowNetModel import ElParoFlowNet
 from models.ElParoFlowNetModelS import ElParoFlowNetS
 from models.ElParoFlowNetModelCvA import ElParoFlowNetCvA
 from models.ElParoFlowNetModelCvB import ElParoFlowNetCvB
-from models.ElParoFlowNetModelCvA import ElParoFlowNetCvA
+from models.ElParoFlowNetModelCvC import ElParoFlowNetCvC
+from models.ElParoFlowNetModelCvD import ElParoFlowNetCvD
+from models.ElParoFlowNetModelCvE import ElParoFlowNetCvE
+from models.ElParoFlowNetModelCvCi import ElParoFlowNetCvCi
+from models.ElParoFlowNetModelCvEa import ElParoFlowNetCvEa
+from models.ElParoFlowNetModelCvEb import ElParoFlowNetCvEb
+from models.ElParoFlowNetModelCvEc import ElParoFlowNetCvEc
+from models.ElParoFlowNetModelCvEd import ElParoFlowNetCvEd
 from models.Trainable import Trainable
 
 argParser = argparse.ArgumentParser(description="El Paro Net...")
@@ -102,24 +109,29 @@ def test(loader, trainable, log):
 
 
 def main():
-    scene_flow_filenames = loaders.SceneFlowFilenames.get_filenames_for_sceneflow_driving(args.scene_flow_dir + '/Driving')
-    scene_flow_filenames.extend(loaders.SceneFlowFilenames.get_filenames_for_sceneflow_monkaa(args.scene_flow_dir + '/Monkaa'))
+    scene_flow_filenames = loaders.SceneFlowFilenames.get_filenames_for_sceneflow_driving(args.scene_flow_dir)
+    scene_flow_filenames.extend(loaders.SceneFlowFilenames.get_filenames_for_sceneflow_monkaa(args.scene_flow_dir))
 
     # Fix for OOM error due to copy on write of string array shared between workers.
     # See https://github.com/pytorch/pytorch/issues/13246#issuecomment-612396143
-    # manager = Manager()
-    # shared_scene_flow_filenames = manager.list(scene_flow_filenames)
+    manager = Manager()
+    shared_scene_flow_filenames = manager.list(scene_flow_filenames)
 
     image_pair_loader = torch.utils.data.DataLoader(
-        SceneFlowLoader(scene_flow_filenames, log=log),
-        batch_size=args.batch_size, num_workers=8,
+        SceneFlowLoader(args.scene_flow_dir, scene_flow_filenames, log=log),
+        batch_size=args.batch_size, num_workers=10,
         pin_memory=True, drop_last=False, shuffle=True
     )
 
     trainables = [
-        Trainable(ElParoFlowNet(), log, cuda_device=0), #data_parallel=True),
-        Trainable(ElParoFlowNetCvA(), log, cuda_device=1), #data_parallel=True)
-        Trainable(ElParoFlowNetCvB(), log, cuda_device=1)
+        #Trainable(ElParoFlowNet(), log, cuda_device=0), #data_parallel=True),
+        #Trainable(ElParoFlowNetCvA(), log, cuda_device=1), #data_parallel=True)
+        #Trainable(ElParoFlowNetCvB(), log, cuda_device=1),
+        #Trainable(ElParoFlowNetCvC(), log, cuda_device=0),
+        Trainable(ElParoFlowNetCvEa(), log, cuda_device=0),
+        Trainable(ElParoFlowNetCvEb(), log, cuda_device=0),
+        Trainable(ElParoFlowNetCvEc(), log, cuda_device=1),
+        Trainable(ElParoFlowNetCvEd(), log, cuda_device=1)
         # Trainable(ElParoFlowNetS(), log, cuda_device=0)
         # Trainable(ElParoFlowNetM(), log, cuda_device=0),
         # Trainable(ElParoFlowNetL(), log, cuda_device=1)

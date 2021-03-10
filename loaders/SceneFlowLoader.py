@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.utils.data
 import numpy as np
@@ -7,12 +8,18 @@ from loaders.SceneFlowIO import readFlow
 
 
 class SceneFlowLoader(torch.utils.data.Dataset):
-    def __init__(self, scene_flow_filenames, log=None):
+    def __init__(self, scene_flow_root, scene_flow_filenames, log=None):
+        self.scene_flow_root = scene_flow_root
         self.filenames = scene_flow_filenames
         self.log = log
 
     def __getitem__(self, index):
         image_filename_a, image_filename_b, flow_filename_a_to_b, flow_filename_b_to_a = self.filenames[index]
+
+        image_filename_a = os.path.join(self.scene_flow_root, image_filename_a)
+        image_filename_b = os.path.join(self.scene_flow_root, image_filename_b)
+        flow_filename_a_to_b = os.path.join(self.scene_flow_root, flow_filename_a_to_b)
+        flow_filename_b_to_a = os.path.join(self.scene_flow_root, flow_filename_b_to_a)
 
         with torch.no_grad():
             pil_image_a = Image.open(image_filename_a).convert('L') # .convert('RGB')
