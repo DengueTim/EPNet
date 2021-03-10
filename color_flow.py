@@ -66,14 +66,14 @@ def flow_to_rgb(flo_data, rad_normaliser=None):
     if rad_normaliser is None:
         rad_normaliser = np.max(rad)
         rad /= rad_normaliser
-        fv /= rad_normaliser
-        fu /= rad_normaliser
+        fv = fv / rad_normaliser
+        fu = fu / rad_normaliser
     else:
         rad /= rad_normaliser
         rad = np.clip(rad, 0.0, 1.0)
-        fv /= rad_normaliser
+        fv = fv / rad_normaliser
         rad = np.clip(rad, -1.0, 1.0)
-        fu /= rad_normaliser
+        fu = fu / rad_normaliser
         rad = np.clip(rad, -1.0, 1.0)
 
     a = np.arctan2(-fv, -fu) / np.pi

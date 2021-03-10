@@ -2,7 +2,6 @@ import os
 import os.path
 import logging
 import numpy as np
-import cv2
 
 
 def logger(name):

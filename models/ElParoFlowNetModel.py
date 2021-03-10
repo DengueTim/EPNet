@@ -8,19 +8,19 @@ class ElParoFlowNet(nn.Module):
         super().__init__()
 
         self.feature_net = nn.Sequential(
-            nn.Conv2d(1, 64, kernel_size=7),
+            nn.Conv2d(1, 64, kernel_size=7, padding=3),
             nn.BatchNorm2d(64),
             nn.LeakyReLU(),
-            nn.Conv2d(64, 128, kernel_size=3),
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
             nn.LeakyReLU(),
-            nn.Conv2d(128, 256, kernel_size=3),
+            nn.Conv2d(128, 256, kernel_size=3, padding=1),
             nn.BatchNorm2d(256),
             nn.LeakyReLU(),
-            nn.Conv2d(256, 128, kernel_size=3),
+            nn.Conv2d(256, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
             nn.LeakyReLU(),
-            nn.Conv2d(128, 64, kernel_size=3),
+            nn.Conv2d(128, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
             nn.LeakyReLU()
         )

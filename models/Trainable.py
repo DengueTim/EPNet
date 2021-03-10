@@ -8,20 +8,22 @@ import re
 
 
 class Trainable():
-    def __init__(self, model, log, lr=1e-3, data_parallel=False):
+    def __init__(self, model, log, lr=1e-3, data_parallel=False, cuda_device=None):
         self.model_name = model.__class__.__name__
 
-        if data_parallel:
-            model = nn.parallel.DataParallel(model)
+        if cuda_device is not None:
+            model = model.cuda(cuda_device)
+        elif data_parallel:
+            model = nn.parallel.DataParallel(model).cuda()
             #model = nn.parallel.DistributedDataParallel(model)
 
-        model = model.cuda()
         self.model = model
+        self.cuda_device = cuda_device
         self.optimizer = optim.Adam(model.parameters(), lr=lr)
         self.epoch = 0
 
         parameter_count = sum([p.data.nelement() for p in model.parameters()])
-        log.info('Model parameter count: {}'.format(parameter_count))
+        log.info('Parameter count {} for model {}'.format(parameter_count, self.model_name))
 
         self.log = log
 
@@ -43,7 +45,14 @@ class Trainable():
         self.optimizer.zero_grad()
 
     def __call__(self, *args, **kwargs):
-        return self.model(*args, **kwargs)
+        if self.cuda_device is None:
+            return self.model(*args, **kwargs)
+
+        a = []
+        for arg in args:
+            a.extend([arg.cuda(self.cuda_device)])
+
+        return self.model(*a, **kwargs).cpu()
 
     def step(self):
         self.optimizer.step()
