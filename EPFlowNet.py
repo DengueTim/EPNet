@@ -25,6 +25,14 @@ from models.ElParoFlowNetModelCvEa import ElParoFlowNetCvEa
 from models.ElParoFlowNetModelCvEb import ElParoFlowNetCvEb
 from models.ElParoFlowNetModelCvEc import ElParoFlowNetCvEc
 from models.ElParoFlowNetModelCvEd import ElParoFlowNetCvEd
+from models.ElParoFlowNetModelCvEcA import ElParoFlowNetCvEcA
+from models.ElParoFlowNetModelCvEcB import ElParoFlowNetCvEcB
+from models.ElParoFlowNetModelCvEcC import ElParoFlowNetCvEcC
+from models.ElParoFlowNetModelCvEcD import ElParoFlowNetCvEcD
+from models.FlowNetC import FlowNetC
+from models.FlowNetS import FlowNetS
+from models.FlowNetPWC import PWCDCNet
+
 from models.Trainable import Trainable
 
 argParser = argparse.ArgumentParser(description="El Paro Net...")
@@ -54,7 +62,7 @@ def train(loader, trainables):
         # flow_a2b_gt = flow_a2b_gt.cuda()
         #flow_b2a_gt = flow_b2a_gt.cuda()
 
-        scaled_h = image_h // scale
+        scaled_h = 32 # image_h // scale
         scaled_w = image_w // scale
 
         image_a_x15 = F.interpolate(image_a, size=(scaled_h, scaled_w), mode='bilinear', align_corners=True)
@@ -124,14 +132,20 @@ def main():
     )
 
     trainables = [
-        #Trainable(ElParoFlowNet(), log, cuda_device=0), #data_parallel=True),
+        Trainable(ElParoFlowNet(), log, cuda_device=0), #data_parallel=True),
         #Trainable(ElParoFlowNetCvA(), log, cuda_device=1), #data_parallel=True)
         #Trainable(ElParoFlowNetCvB(), log, cuda_device=1),
         #Trainable(ElParoFlowNetCvC(), log, cuda_device=0),
-        Trainable(ElParoFlowNetCvEa(), log, cuda_device=0),
-        Trainable(ElParoFlowNetCvEb(), log, cuda_device=0),
-        Trainable(ElParoFlowNetCvEc(), log, cuda_device=1),
-        Trainable(ElParoFlowNetCvEd(), log, cuda_device=1)
+        #Trainable(ElParoFlowNetCvEa(), log, cuda_device=0),
+        #Trainable(ElParoFlowNetCvEb(), log, cuda_device=0),
+        #Trainable(ElParoFlowNetCvEc(), log, cuda_device=1),
+        #Trainable(ElParoFlowNetCvEd(), log, cuda_device=1)
+        #Trainable(ElParoFlowNetCvEcC(), log, cuda_device=0),
+        Trainable(ElParoFlowNetCvEcD(), log, cuda_device=1),
+        # Trainable(FlowNetC(), log, cuda_device=0),
+        #Trainable(FlowNetS(), log, cuda_device=1),
+        # Trainable(PWCDCNet(), log, data_parallel=True) #, cuda_device=0),
+
         # Trainable(ElParoFlowNetS(), log, cuda_device=0)
         # Trainable(ElParoFlowNetM(), log, cuda_device=0),
         # Trainable(ElParoFlowNetL(), log, cuda_device=1)

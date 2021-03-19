@@ -17,6 +17,7 @@ class Trainable():
             model = nn.parallel.DataParallel(model).cuda()
             #model = nn.parallel.DistributedDataParallel(model)
 
+        self.data_parallel = data_parallel
         self.model = model
         self.cuda_device = cuda_device
         self.optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -45,6 +46,9 @@ class Trainable():
         self.optimizer.zero_grad()
 
     def __call__(self, *args, **kwargs):
+        if self.data_parallel is True:
+            return self.model(*args, **kwargs).cpu()
+
         if self.cuda_device is None:
             return self.model(*args, **kwargs)
 
