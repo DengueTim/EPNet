@@ -40,7 +40,7 @@ def deconv(in_planes, out_planes, kernel_size=4, stride=2, padding=1):
     return nn.ConvTranspose2d(int(in_planes), out_planes, kernel_size, stride, padding, bias=True)
 
 
-class FlowNetPwcLike(nn.Module):
+class FlowNetPwc3x(nn.Module):
     """
     PWC-DC net. add dilation convolution and densenet connections
 
@@ -50,26 +50,20 @@ class FlowNetPwcLike(nn.Module):
         input: md --- maximum displacement (for correlation. default: 4), after warpping
 
         """
-        super(FlowNetPwcLike,self).__init__()
+        super(FlowNetPwc3x,self).__init__()
 
-        self.conv1a  = conv(1,   16, kernel_size=3, stride=2)
+        self.conv1a  = conv(1,   16, kernel_size=5, stride=3)
         self.conv1aa = conv(16,  16, kernel_size=3, stride=1)
         self.conv1b  = conv(16,  16, kernel_size=3, stride=1)
-        self.conv2a  = conv(16,  32, kernel_size=3, stride=2)
-        self.conv2aa = conv(32,  32, kernel_size=3, stride=1)
-        self.conv2b  = conv(32,  32, kernel_size=3, stride=1)
-        self.conv3a  = conv(32,  64, kernel_size=3, stride=2)
-        self.conv3aa = conv(64,  64, kernel_size=3, stride=1)
-        self.conv3b  = conv(64,  64, kernel_size=3, stride=1)
-        self.conv4a  = conv(64,  96, kernel_size=3, stride=2)
-        self.conv4aa = conv(96,  96, kernel_size=3, stride=1)
-        self.conv4b  = conv(96,  96, kernel_size=3, stride=1)
-        self.conv5a  = conv(96, 128, kernel_size=3, stride=2)
-        self.conv5aa = conv(128,128, kernel_size=3, stride=1)
-        self.conv5b  = conv(128,128, kernel_size=3, stride=1)
-        self.conv6aa = conv(128,196, kernel_size=3, stride=2)
-        self.conv6a  = conv(196,196, kernel_size=3, stride=1)
-        self.conv6b  = conv(196,196, kernel_size=3, stride=1)
+        self.conv2a  = conv(16,  64, kernel_size=5, stride=3)
+        self.conv2aa = conv(64,  64, kernel_size=3, stride=1)
+        self.conv2b  = conv(64,  64, kernel_size=3, stride=1)
+        self.conv3a  = conv(64,  128, kernel_size=5, stride=3)
+        self.conv3aa = conv(128, 128, kernel_size=3, stride=1)
+        self.conv3b  = conv(128, 128, kernel_size=3, stride=1)
+        self.conv4a  = conv(128, 256, kernel_size=5, stride=3)
+        self.conv4aa = conv(256, 256, kernel_size=3, stride=1)
+        self.conv4b  = conv(256, 256, kernel_size=3, stride=1)
 
         #self.corr    = Correlation(pad_size=md, kernel_size=1, max_displacement=md, stride1=1, stride2=1, corr_multiply=1)
         md2plus1 = md * 2 + 1
@@ -80,53 +74,42 @@ class FlowNetPwcLike(nn.Module):
         dd = np.cumsum([128,128,96,64,32])
 
         od = nd
-        self.conv6_0 = conv(od,      128, kernel_size=3, stride=1)
-        self.conv6_1 = conv(od+dd[0],128, kernel_size=3, stride=1)
-        self.conv6_2 = conv(od+dd[1],96,  kernel_size=3, stride=1)
-        self.conv6_3 = conv(od+dd[2],64,  kernel_size=3, stride=1)
-        self.conv6_4 = conv(od+dd[3],32,  kernel_size=3, stride=1)
-        self.predict_flow6 = predict_flow(od+dd[4])
-        self.deconv6 = deconv(2, 2, kernel_size=4, stride=2, padding=1)
-        self.upfeat6 = deconv(od+dd[4], 2, kernel_size=4, stride=2, padding=1)
-
-        od = nd+128+4
-        self.conv5_0 = conv(od,      128, kernel_size=3, stride=1)
-        self.conv5_1 = conv(od+dd[0],128, kernel_size=3, stride=1)
-        self.conv5_2 = conv(od+dd[1],96,  kernel_size=3, stride=1)
-        self.conv5_3 = conv(od+dd[2],64,  kernel_size=3, stride=1)
-        self.conv5_4 = conv(od+dd[3],32,  kernel_size=3, stride=1)
-        self.predict_flow5 = predict_flow(od+dd[4])
-        self.deconv5 = deconv(2, 2, kernel_size=4, stride=2, padding=1)
-        self.upfeat5 = deconv(od+dd[4], 2, kernel_size=4, stride=2, padding=1)
-
-        od = nd+96+4
         self.conv4_0 = conv(od,      128, kernel_size=3, stride=1)
         self.conv4_1 = conv(od+dd[0],128, kernel_size=3, stride=1)
         self.conv4_2 = conv(od+dd[1],96,  kernel_size=3, stride=1)
         self.conv4_3 = conv(od+dd[2],64,  kernel_size=3, stride=1)
         self.conv4_4 = conv(od+dd[3],32,  kernel_size=3, stride=1)
         self.predict_flow4 = predict_flow(od+dd[4])
-        self.deconv4 = deconv(2, 2, kernel_size=4, stride=2, padding=1)
-        self.upfeat4 = deconv(od+dd[4], 2, kernel_size=4, stride=2, padding=1)
+        self.deconv4 = deconv(2, 2, kernel_size=5, stride=3, padding=1)
+        self.upfeat4 = deconv(od+dd[4], 2, kernel_size=5, stride=3, padding=1)
 
-        od = nd+64+4
+        od = nd+128+4
         self.conv3_0 = conv(od,      128, kernel_size=3, stride=1)
         self.conv3_1 = conv(od+dd[0],128, kernel_size=3, stride=1)
         self.conv3_2 = conv(od+dd[1],96,  kernel_size=3, stride=1)
         self.conv3_3 = conv(od+dd[2],64,  kernel_size=3, stride=1)
         self.conv3_4 = conv(od+dd[3],32,  kernel_size=3, stride=1)
-        self.predict_flow3 = predict_flow(od+dd[4]) 
-        self.deconv3 = deconv(2, 2, kernel_size=4, stride=2, padding=1) 
-        self.upfeat3 = deconv(od+dd[4], 2, kernel_size=4, stride=2, padding=1)
+        self.predict_flow3 = predict_flow(od+dd[4])
+        self.deconv3 = deconv(2, 2, kernel_size=5, stride=3, padding=1)
+        self.upfeat3 = deconv(od+dd[4], 2, kernel_size=5, stride=3, padding=1)
         
-        od = nd+32+4
+        od = nd+64+4
         self.conv2_0 = conv(od,      128, kernel_size=3, stride=1)
         self.conv2_1 = conv(od+dd[0],128, kernel_size=3, stride=1)
         self.conv2_2 = conv(od+dd[1],96,  kernel_size=3, stride=1)
         self.conv2_3 = conv(od+dd[2],64,  kernel_size=3, stride=1)
         self.conv2_4 = conv(od+dd[3],32,  kernel_size=3, stride=1)
-        self.predict_flow2 = predict_flow(od+dd[4]) 
-        self.deconv2 = deconv(2, 2, kernel_size=4, stride=2, padding=1)
+        self.predict_flow2 = predict_flow(od+dd[4])
+        self.deconv2 = deconv(2, 2, kernel_size=5, stride=3, padding=1)
+        self.upfeat2 = deconv(od + dd[4], 2, kernel_size=5, stride=3, padding=1)
+
+        od = nd + 16 + 4
+        self.conv1_0 = conv(od, 128, kernel_size=3, stride=1)
+        self.conv1_1 = conv(od + dd[0], 128, kernel_size=3, stride=1)
+        self.conv1_2 = conv(od + dd[1], 96, kernel_size=3, stride=1)
+        self.conv1_3 = conv(od + dd[2], 64, kernel_size=3, stride=1)
+        self.conv1_4 = conv(od + dd[3], 32, kernel_size=3, stride=1)
+        self.predict_flow1 = predict_flow(od + dd[4])
 
         self.dc_conv1 = conv(od+dd[4], 128, kernel_size=3, stride=1, padding=1,  dilation=1)
         self.dc_conv2 = conv(128,      128, kernel_size=3, stride=1, padding=2,  dilation=2)
@@ -195,41 +178,10 @@ class FlowNetPwcLike(nn.Module):
         c23 = self.conv3b(self.conv3aa(self.conv3a(c22)))
         c14 = self.conv4b(self.conv4aa(self.conv4a(c13)))
         c24 = self.conv4b(self.conv4aa(self.conv4a(c23)))
-        c15 = self.conv5b(self.conv5aa(self.conv5a(c14)))
-        c25 = self.conv5b(self.conv5aa(self.conv5a(c24)))
-        c16 = self.conv6b(self.conv6a(self.conv6aa(c15)))
-        c26 = self.conv6b(self.conv6a(self.conv6aa(c25)))
 
-        corr6 = self.corr(c16, c26)
-        corr6 = self.leakyRELU(self.collate_corr(corr6))
-
-        x = torch.cat((self.conv6_0(corr6), corr6),1)
-        x = torch.cat((self.conv6_1(x), x),1)
-        x = torch.cat((self.conv6_2(x), x),1)
-        x = torch.cat((self.conv6_3(x), x),1)
-        x = torch.cat((self.conv6_4(x), x),1)
-        flow6 = self.predict_flow6(x)
-        up_flow6 = self.deconv6(flow6)
-        up_feat6 = self.upfeat6(x)
-
-        warp5 = self.warp(c25, up_flow6*0.03125)
-        corr5 = self.corr(c15, warp5)
-        corr5 = self.leakyRELU(self.collate_corr(corr5))
-        x = torch.cat((corr5, c15, up_flow6, up_feat6), 1)
-        x = torch.cat((self.conv5_0(x), x),1)
-        x = torch.cat((self.conv5_1(x), x),1)
-        x = torch.cat((self.conv5_2(x), x),1)
-        x = torch.cat((self.conv5_3(x), x),1)
-        x = torch.cat((self.conv5_4(x), x),1)
-        flow5 = self.predict_flow5(x)
-        up_flow5 = self.deconv5(flow5)
-        up_feat5 = self.upfeat5(x)
-
-        warp4 = self.warp(c24, up_flow5*0.0625)
-        corr4 = self.corr(c14, warp4)
+        corr4 = self.corr(c14, c24)
         corr4 = self.leakyRELU(self.collate_corr(corr4))
-        x = torch.cat((corr4, c14, up_flow5, up_feat5), 1)
-        x = torch.cat((self.conv4_0(x), x),1)
+        x = torch.cat((self.conv4_0(corr4), corr4),1)
         x = torch.cat((self.conv4_1(x), x),1)
         x = torch.cat((self.conv4_2(x), x),1)
         x = torch.cat((self.conv4_3(x), x),1)
@@ -238,10 +190,9 @@ class FlowNetPwcLike(nn.Module):
         up_flow4 = self.deconv4(flow4)
         up_feat4 = self.upfeat4(x)
 
-        warp3 = self.warp(c23, up_flow4*0.125)
+        warp3 = self.warp(c23, up_flow4*0.037)
         corr3 = self.corr(c13, warp3)
         corr3 = self.leakyRELU(self.collate_corr(corr3))
-
         x = torch.cat((corr3, c13, up_flow4, up_feat4), 1)
         x = torch.cat((self.conv3_0(x), x),1)
         x = torch.cat((self.conv3_1(x), x),1)
@@ -252,7 +203,7 @@ class FlowNetPwcLike(nn.Module):
         up_flow3 = self.deconv3(flow3)
         up_feat3 = self.upfeat3(x)
 
-        warp2 = self.warp(c22, up_flow3*0.25)
+        warp2 = self.warp(c22, up_flow3*0.1111)
         corr2 = self.corr(c12, warp2)
         corr2 = self.leakyRELU(self.collate_corr(corr2))
         x = torch.cat((corr2, c12, up_flow3, up_feat3), 1)
@@ -262,15 +213,28 @@ class FlowNetPwcLike(nn.Module):
         x = torch.cat((self.conv2_3(x), x),1)
         x = torch.cat((self.conv2_4(x), x),1)
         flow2 = self.predict_flow2(x)
+        up_flow2 = self.deconv2(flow2)
+        up_feat2 = self.upfeat2(x)
+
+        warp1 = self.warp(c21, up_flow2*0.3333)
+        corr1 = self.corr(c11, warp1)
+        corr1 = self.leakyRELU(self.collate_corr(corr1))
+        x = torch.cat((corr1, c11, up_flow2, up_feat2), 1)
+        x = torch.cat((self.conv1_0(x), x),1)
+        x = torch.cat((self.conv1_1(x), x),1)
+        x = torch.cat((self.conv1_2(x), x),1)
+        x = torch.cat((self.conv1_3(x), x),1)
+        x = torch.cat((self.conv1_4(x), x),1)
+        flow1 = self.predict_flow1(x)
 
         x = self.dc_conv4(self.dc_conv3(self.dc_conv2(self.dc_conv1(x))))
-        flow2 = flow2 + self.dc_conv7(self.dc_conv6(self.dc_conv5(x)))
+        flow1 = flow1 + self.dc_conv7(self.dc_conv6(self.dc_conv5(x)))
 
-        return flow2,flow3,flow4,flow5,flow6
+        return flow1, flow2, flow3, flow4
 
         # flow0 = F.interpolate(flow2, scale_factor=4, mode='bilinear')
         # return flow0
 
     @staticmethod
     def loss(prediction, target):
-        return multiscaleEPE(prediction, target)
+        return multiscaleEPE(prediction, target, weights=[0.005, 0.01, 0.02, 0.08])
